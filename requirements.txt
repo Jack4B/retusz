@@ -1,0 +1,7 @@
+numpy>=2.0
+opencv-python-headless>=4.10
+pillow>=10.0
+numba>=0.60
+customtkinter>=5.2
+onnxruntime>=1.18 ; sys_platform != "win32"
+onnxruntime-directml>=1.18 ; sys_platform == "win32"

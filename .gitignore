@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+build/
+dist/
+.pytest_cache/
+*.retusz.json
+retusz-seria.json
+*.part
+*.onnx-download
+/models/
+*.log
+.coverage
