@@ -69,6 +69,22 @@ def test_nef_preview_matches_full_decode(nef):
     assert dE.mean() < 1.0, dE.mean()
 
 @need_nef
+@pytest.mark.parametrize("nef", SAMPLES, ids=lambda p: p.name)
+def test_nef_preview_is_downscale_of_ahd_export(nef):
+    """Regression (0.1.3, his noisy D700): a PPG preview against an AHD export drifted (ΔE 1.35–1.53).
+    The 1600 px preview must be a downscale of the same AHD develop as the export, not a faster demosaic."""
+    full, _ = imageio.load(nef)
+    prev = imageio.load_preview(nef, 1600)
+    ahd = cv2.resize(full, (prev.shape[1], prev.shape[0]), interpolation=cv2.INTER_AREA)
+    dE_ahd = float(np.linalg.norm(C.to_lab(prev) - C.to_lab(ahd), axis=-1).mean())
+    a16 = rawio._decode16(nef, fast=True)
+    ppg = cv2.resize(rawio.develop(a16, rawio.exposure_gain(nef, a16)), (prev.shape[1], prev.shape[0]), interpolation=cv2.INTER_AREA)
+    dE_ppg = float(np.linalg.norm(C.to_lab(prev) - C.to_lab(ppg), axis=-1).mean())
+    assert dE_ahd < 0.15, dE_ahd
+    if dE_ppg > 0.2:
+        assert dE_ahd < dE_ppg / 2, (dE_ahd, dE_ppg)
+
+@need_nef
 def test_nef_thumbnail_is_fast_embedded_and_upright():
     nef = SAMPLES[0]
     th = imageio.load_preview(nef, 240)

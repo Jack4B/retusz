@@ -3,9 +3,10 @@
 Decode: camera white balance, LibRaw's camera matrix to linear sRGB, 16 bits per channel.
 Then, through a 65536-entry float table: exposure (matched to the camera's embedded JPEG, so the photo starts as bright as on
 the camera screen), a soft highlight shoulder, sRGB encoding, and one ordered-dither quantisation
-to 8 bits for the engine. Export demosaics with AHD (quality); previews with PPG (faster, colours
-registered: LibRaw's half-size mode shifts R against B by half a pixel and gave preview-vs-export
-dE 2.7 on fine detail, PPG gives 0.45). The series strip uses the embedded camera JPEG (instant)."""
+to 8 bits for the engine. Both export and the 1600 px preview demosaic with AHD and then develop at
+full resolution (the preview is a downscale of that). LibRaw's half-size mode shifts R against B by
+half a pixel (preview-vs-export ΔE 2.7); a faster PPG preview drifted to ΔE 1.35–1.53 on noisy D700
+files. The series strip uses the embedded camera JPEG (instant)."""
 from __future__ import annotations
 import io, threading
 from functools import lru_cache
@@ -164,7 +165,7 @@ def load_preview(path, side, with_icc=False):
             im = Image.open(io.BytesIO(data)); im.draft("RGB", (side*2, side*2)); im = im.convert("RGB")
             im.thumbnail((side, side), Image.LANCZOS); a = np.ascontiguousarray(orient(np.asarray(im), flip))
     if a is None:
-        a16 = _decode16(path, fast=True)
+        a16 = _decode16(path)
         rgb = develop(a16, exposure_gain(path, a16))
         h, w = rgb.shape[:2]; s = min(1.0, side/max(h, w))
         a = rgb if s >= 1 else cv2.resize(rgb, (max(1, round(w*s)), max(1, round(h*s))), interpolation=cv2.INTER_AREA)
