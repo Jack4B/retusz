@@ -15,7 +15,7 @@ from PIL import Image
 
 RAW_EXTS = {".nef", ".nrw"}
 KNEE = 0.8                   # linear value where the highlight shoulder starts
-TARGET_DEFAULT = 0.42        # encoded median luminance when the file has no embedded JPEG
+TARGET_DEFAULT = 50.0        # mean CIE L* when the file has no embedded JPEG
 _Y = np.array([0.2126, 0.7152, 0.0722], np.float32)
 _BAYER = (np.array([[0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26], [12, 44, 4, 36, 14, 46, 6, 38],
                     [60, 28, 52, 20, 62, 30, 54, 22], [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25],
@@ -72,17 +72,29 @@ def _small(a16, side=512):
     h, w = a16.shape[:2]; s = side/max(h, w)
     return cv2.resize(a16, (max(1, round(w*s)), max(1, round(h*s))), interpolation=cv2.INTER_AREA).astype(np.float32)/65535
 
+def _mean_lstar(lin):
+    """Mean CIE L* of linear RGB (Rec.709/sRGB primaries)."""
+    y = np.clip(lin.reshape(-1, 3) @ _Y, 0, 1)
+    f = np.where(y > 216/24389, np.cbrt(y), (24389/27*y + 16)/116)
+    return float((116*f - 16).mean())
+
+def _decode_srgb(a):
+    return np.where(a <= 0.04045, a/12.92, ((a+0.055)/1.055)**2.4).astype(np.float32)
+
 @lru_cache(maxsize=64)
 def _target(path, mtime):
+    """Mean L* of the camera's embedded JPEG (what the photographer saw on the camera screen)."""
     data, _ = _thumb_jpeg(path)
     if data is None: return TARGET_DEFAULT
     im = Image.open(io.BytesIO(data)); im.draft("RGB", (512, 512)); a = np.asarray(im.convert("RGB"), np.float32)/255
-    return float(np.median(a.reshape(-1, 3) @ _Y))
+    return _mean_lstar(_decode_srgb(a))
 
 _gain_cache = {}
 
 def exposure_gain(path, a16=None):
-    """Linear gain so the encoded median luminance matches the embedded JPEG (cached per file)."""
+    """Linear gain so the developed photo's mean L* matches the embedded camera JPEG (cached per file).
+    Mean L*, not median luminance: with a high-key frame the camera's S-curve and our gentler shoulder
+    give the same median but a mean L* up to 7 apart (measured on D700 files)."""
     p = Path(path); k = (str(p.resolve()), p.stat().st_mtime_ns)
     with _lock:
         if k in _gain_cache: return _gain_cache[k]
@@ -91,8 +103,8 @@ def exposure_gain(path, a16=None):
     lo, hi = np.log(0.25), np.log(8.0)
     for _ in range(28):
         m = (lo+hi)/2
-        med = float(np.median(encode(shoulder(small*np.exp(m))).reshape(-1, 3) @ _Y))
-        lo, hi = (m, hi) if med < tgt else (lo, m)
+        cur = _mean_lstar(shoulder(small*np.exp(m)))
+        lo, hi = (m, hi) if cur < tgt else (lo, m)
     g = float(np.exp((lo+hi)/2))
     with _lock: _gain_cache[k] = g
     return g
