@@ -89,6 +89,13 @@ def estimate_light(rgb, n, fg):
     if np.hypot(c[1], c[2]) < 1e-3: return None
     return float(np.degrees(np.arctan2(-c[2], c[1])) % 360)
 
+def guided_filter(I, r, eps):
+    """Self-guided edge-preserving smoothing (He, Sun, Tang 2010), box filters only."""
+    box = lambda x: cv2.boxFilter(x, -1, (2*r+1, 2*r+1))
+    m = box(I); v = box(I*I) - m*m
+    a = v/(v+eps); b = m - a*m
+    return box(a)*I + box(b)
+
 class Relight:
     """Per-image 3D data, computed once in fit() on the analysis image."""
     def __init__(self, rgb, skin=None, faces_n=(), use_ai=True):
@@ -108,8 +115,9 @@ class Relight:
         n = rs(self.n); fg = rs(self.fg); curv = rs(self.curv)
         shade = np.clip(n@l - l[2], -0.8, 0.5)                      # flat, camera-facing = 0
         shade = cv2.GaussianBlur(shade, (0, 0), max(qw, qh)/300)
-        Lb = cv2.GaussianBlur(Lq, (0, 0), max(qw, qh)/50)
-        clarity = np.clip((Lq-Lb)/np.maximum(Lq, 10), -0.5, 0.5)
-        g = fg*(0.38*shade + 0.06*curv + 0.35*clarity) - 0.10*(1-fg)  # subject sculpt + separation
+        # local contrast on an edge-preserving base (guided filter): no halos around glasses, hair or shoulders
+        Lb = guided_filter(Lq.astype(np.float32), max(2, int(max(qw, qh)/60)), 6.0**2)
+        clarity = np.clip(Lq-Lb, -6, 6)/np.maximum(Lq, 25)
+        g = fg*(0.38*shade + 0.06*curv + 0.15*clarity) - 0.08*(1-fg)  # subject sculpt + gentle separation
         g = np.where(g > 0, g*np.clip((97-Lq)/25, 0, 1), g)          # no blown highlights
         return (amount*g).astype(np.float32)

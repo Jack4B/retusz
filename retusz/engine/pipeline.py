@@ -22,13 +22,14 @@ class Params:
     skin: float = 1.0
     shadows: float = 0.0
     highlights: float = 0.0
-    vignette: float = 0.4
+    vignette: float = 0.3
     db: float = 0.4
-    plastic: float = 0.6            # 'Plastyka 3D'
+    plastic: float = 0.3            # 'Plastyka 3D'
     light_angle: float | None = None  # 'Kierunek światła' in degrees, None = auto (from the reference)
     saturation: float = 0.0         # 'Nasycenie' -1..1
     vibrance: float = 0.0           # 'Jaskrawość' -1..1 (boosts dull colours, spares skin)
     skin_even: float = 0.3          # 'Równanie skóry' 0..1 (local colour casts on skin, mixed light)
+    wide: float = 0.0               # 'Pełne barwy' 0..1: colours as sRGB numbers look on a wide-gamut (AdobeRGB) monitor
     strokes: list = field(default_factory=list)  # manual dodge/burn, see brush_map()
 
     def to_dict(self):
@@ -39,7 +40,7 @@ class Params:
         names = {f.name for f in fields(cls)}
         p = cls(**{k: v for k, v in (d or {}).items() if k in names})
         if p.light_angle is not None: p.light_angle = float(p.light_angle) % 360
-        for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even"):
+        for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even", "wide"):
             setattr(p, k, float(np.clip(getattr(p, k), 0, 1)))
         for k in ("shadows", "highlights", "saturation", "vibrance"):
             setattr(p, k, float(np.clip(getattr(p, k), -1, 1)))
@@ -47,7 +48,7 @@ class Params:
         return p
 
     def colour_key(self):
-        return tuple(round(getattr(self, k), 3) for k in ("strength", "shadows", "highlights", "saturation", "vibrance"))
+        return tuple(round(getattr(self, k), 3) for k in ("strength", "shadows", "highlights", "saturation", "vibrance", "wide"))
 
 @dataclass
 class RefAnalysis:
@@ -71,6 +72,9 @@ class Fit:
     method: str
     timings: dict = field(default_factory=dict)
     relight: object = None   # RL.Relight (3D data) or None
+    guard_bg: tuple = None     # closed-loop background a/b correction (A, b), see _guard
+    guard_skin: tuple = None   # closed-loop skin a/b correction (A, b)
+    hue_k: object = None       # background per-hue chroma ratios (HUE_SECTORS)
 
 def brush_map(strokes, h, w):
     """Rasterise brush strokes into a signed map (-1 burn .. +1 dodge) at h x w.
@@ -117,6 +121,89 @@ def skin_even_gain(rgb_q, lab_q, mask, faces_q, amount):
     g = np.where(cur > 0.03, rgb_t/np.maximum(cur, 0.03) - 1, 0)
     return np.clip(g*mask[..., None], -0.35, 0.35).astype(np.float32)
 
+# AdobeRGB (1998) -> sRGB, linear light, D65
+_A2S = np.array([[1.39836, -0.39836, 0.0], [0.0, 1.0, 0.0], [0.0, -0.04293, 1.04293]], np.float32)
+
+def wide_gamut_look(rgb):
+    """What sRGB numbers look like when a wide-gamut (AdobeRGB-like) monitor shows them unmanaged,
+    expressed back in sRGB: decode as AdobeRGB (gamma 2.2), convert to sRGB primaries, compress
+    out-of-gamut chroma towards luminance (hue kept), encode sRGB. rgb, result: float 0..1."""
+    lin = np.power(np.clip(rgb, 0, 1), 2.2) @ _A2S.T
+    Y = (lin @ np.array([0.2126, 0.7152, 0.0722], np.float32))[..., None]
+    d = lin - Y
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t_hi = np.where(d > 1e-6, (1 - Y)/d, np.inf); t_lo = np.where(d < -1e-6, -Y/d, np.inf)
+    t = np.clip(np.minimum(t_hi, t_lo).min(axis=-1, keepdims=True), 0, 1)
+    lin = np.clip(Y + d*t, 0, 1)
+    return np.where(lin <= 0.0031308, 12.92*lin, 1.055*np.power(lin, 1/2.4) - 0.055).astype(np.float32)
+
+def _guard(out_lab, out_m, ref_lab, ref_m, max_shift, c_lo, c_hi, mkl=0.0):
+    """Closed-loop region guard. Returns an affine a/b correction (A 2x2, b 2): ab' = ab @ A + b, so that the rendered
+    region matches the reference: mkl>0 blends in a linear Monge-Kantorovich map of the a/b distribution (Pitié 2007,
+    removes casts that a mean shift cannot, e.g. cyan posters next to a warm wall); otherwise a Reinhard-style
+    mean/chroma match. The result's mean chroma is kept within [c_lo, c_hi] x reference (no oversaturation)."""
+    I = np.eye(2, dtype=np.float32)
+    if out_m.sum() < 300 or ref_m.sum() < 300: return (I, np.zeros(2, np.float32))
+    o = out_lab[..., 1:][out_m].astype(np.float64); r = ref_lab[..., 1:][ref_m].astype(np.float64)
+    cr = np.hypot(r[:, 0], r[:, 1]).mean()
+    if mkl > 0:
+        mu_o, mu_r, T = C.mkl_fit(o, r); T = T.astype(np.float64)
+        A = (1-mkl)*np.eye(2) + mkl*T.T; bb = mkl*(mu_r - mu_o@T.T)
+        bb = bb + (1-mkl)*(mu_r - mu_o)*0.5
+    else:
+        co = np.hypot(o[:, 0], o[:, 1]).mean(); k = float(np.clip(cr/max(co, 1e-3), c_lo, c_hi))
+        A = np.eye(2)*k; bb = r.mean(0) - o.mean(0)*k
+    bb = np.clip(bb, -max_shift, max_shift)
+    n = o@A + bb; cn = np.hypot(n[:, 0], n[:, 1]).mean()
+    f = float(np.clip(cr*c_hi/max(cn, 1e-3), 0, 1)) if cn > cr*c_hi else float(max(1.0, cr*c_lo/max(cn, 1e-3)))
+    return ((A*f).astype(np.float32), (bb*f).astype(np.float32))
+
+def _dodge_burn_region(out, mq_raw, faces_px, strength):
+    """Auto D&B over ONE region covering all faces (overlapping per-face crops used to be pasted one over another,
+    which left hard seams across neighbouring faces). The L change is feathered to zero at the region border."""
+    H, W = out.shape[:2]
+    x0 = max(0, int(min(x - 0.6*w for x, y, w, h in faces_px))); y0 = max(0, int(min(y - 0.4*h for x, y, w, h in faces_px)))
+    x1 = min(W, int(max(x + 1.6*w for x, y, w, h in faces_px))); y1 = min(H, int(max(y + 1.9*h for x, y, w, h in faces_px)))
+    if x1-x0 < 8 or y1-y0 < 8: return out
+    mc = cv2.resize(mq_raw[y0//4:(y1+3)//4, x0//4:(x1+3)//4], (x1-x0, y1-y0), interpolation=cv2.INTER_LINEAR)
+    crop = out[y0:y1, x0:x1]; lab = C.to_lab(crop)
+    new = C.dodge_burn(lab, mc, [(x-x0, y-y0, w, h) for x, y, w, h in faces_px], strength)
+    dL = new[..., 0] - lab[..., 0]
+    fw = float(np.median([f[2] for f in faces_px])); m = max(4, int(0.15*fw))       # feather width
+    wy = np.clip(np.minimum(np.arange(y1-y0), np.arange(y1-y0)[::-1])/m, 0, 1)
+    wx = np.clip(np.minimum(np.arange(x1-x0), np.arange(x1-x0)[::-1])/m, 0, 1)
+    for edge_is_border, sl in ((y0 == 0, slice(None, m)), (y1 == H, slice(-m, None))):
+        if edge_is_border: wy[sl] = 1
+    for edge_is_border, sl in ((x0 == 0, slice(None, m)), (x1 == W, slice(-m, None))):
+        if edge_is_border: wx[sl] = 1
+    lab[..., 0] += dL*(wy[:, None]*wx[None, :]).astype(np.float32)
+    out = out.copy(); out[y0:y1, x0:x1] = C.from_lab(lab)
+    return out
+
+HUE_SECTORS = 8
+
+def _hue_chroma_match(out_lab, out_m, ref_lab, ref_m, lo=0.5, hi=1.05):
+    """Per-hue chroma ratios (reference / result) in HUE_SECTORS sectors, from the 75th percentile chroma of each
+    sector; a sector without enough pixels in both images stays 1. Like an automatic HSL 'saturation' panel."""
+    k = np.ones(HUE_SECTORS, np.float32)
+    o = out_lab[..., 1:][out_m]; r = ref_lab[..., 1:][ref_m]
+    if len(o) < 500 or len(r) < 500: return k
+    def sect(ab):
+        c = np.hypot(ab[:, 0], ab[:, 1]); h = (np.degrees(np.arctan2(ab[:, 1], ab[:, 0])) % 360)
+        return c, (h/(360/HUE_SECTORS)).astype(int) % HUE_SECTORS
+    co, so = sect(o); cr, sr = sect(r)
+    for i in range(HUE_SECTORS):
+        a, b = co[(so == i) & (co > 4)], cr[(sr == i) & (cr > 4)]
+        if len(a) > 0.01*len(o) and len(b) > 0.005*len(r):
+            k[i] = float(np.clip(np.percentile(b, 75)/max(np.percentile(a, 75), 1e-3), lo, hi))
+    return k
+
+def _apply_hue_chroma(ab, k):
+    h = (np.degrees(np.arctan2(ab[..., 1], ab[..., 0])) % 360)/(360/HUE_SECTORS) - 0.5
+    i0 = np.floor(h).astype(int) % HUE_SECTORS; t = h - np.floor(h)
+    f = k[i0]*(1-t) + k[(i0+1) % HUE_SECTORS]*t
+    return ab*f[..., None]
+
 BRUSH_GAIN = 0.25  # max +-25% exposure at strength 1 (subtle)
 
 class Engine:
@@ -160,8 +247,12 @@ class Engine:
         glob = C.smooth_lut(glob)
         sk_s = S.reshape(-1, 3)[ms.ravel() > 0.6]; sk_r = ref.lab.reshape(-1, 3)[ref.mask.ravel() > 0.6]
         if len(sk_s) > 500 and len(sk_r) > 500:
-            mu_s, mu_r, Tm = C.mkl_fit(sk_s, sk_r)
-            skin = ((Glab.reshape(-1, 3)-mu_s)@Tm + mu_r).reshape(Glab.shape).astype(np.float32)
+            mu_s, mu_r, Tm = C.mkl_fit(sk_s[:, 1:], sk_r[:, 1:])       # colour of skin: linear Monge-Kantorovich on a/b
+            g = Glab.reshape(-1, 3); skin = np.empty_like(g)
+            k = float(np.clip(sk_r[:, 0].std()/max(sk_s[:, 0].std(), 1e-3), 0.85, 1.05))   # never harden skin contrast much
+            skin[:, 0] = (g[:, 0]-sk_s[:, 0].mean())*k + sk_r[:, 0].mean()
+            skin[:, 1:] = (g[:, 1:]-mu_s)@Tm + mu_r
+            skin = skin.reshape(Glab.shape).astype(np.float32)
         else:
             skin = glob
         T["fit_s"] = time.perf_counter()-t; t = time.perf_counter()
@@ -183,7 +274,16 @@ class Engine:
         fit.relight = RL.Relight(s, ms, fit.faces_n, self.depth_ai)
         if ref.light_angle is not None: fit.relight.auto_angle = ref.light_angle   # light like in the reference
         T["depth_s"] = time.perf_counter()-t3
-        # closed loop: render the analysis image with default controls, re-bake with the mean LAB residual
+        # closed loop 1: per-region guard (skin / background): match mean a/b, never exceed the reference chroma
+        loop = Params(plastic=0.0, skin_even=0.0, vignette=0.0, strokes=[])
+        out = C.to_lab(self.render(s, fit, loop, db_enabled=False))
+        fit.guard_skin = _guard(out, ms > 0.6, ref.lab, ref.mask > 0.6, max_shift=5.0, c_lo=0.75, c_hi=1.02)
+        fit.guard_bg = _guard(out, ms < 0.1, ref.lab, ref.mask < 0.1, max_shift=6.0, c_lo=0.6, c_hi=1.03, mkl=0.7)
+        fit._lut_cache = {}
+        out = C.to_lab(self.render(s, fit, loop, db_enabled=False))
+        fit.hue_k = _hue_chroma_match(out, ms < 0.1, ref.lab, ref.mask < 0.1)
+        fit._lut_cache = {}
+        # closed loop 2: global mean residual
         out = self.render(s, fit, Params(plastic=0.0, skin_even=0.0, strokes=[]), db_enabled=False)  # colour only
         res = ref.lab.reshape(-1, 3).mean(0) - C.to_lab(out).reshape(-1, 3).mean(0)
         fit.offset = (float(np.clip(res[0], -4, 4)), float(np.clip(res[1], -3, 3)), float(np.clip(res[2], -3, 3)))
@@ -193,9 +293,11 @@ class Engine:
 
     # ---------- stage 3 ----------
     @staticmethod
-    def _bake_one(lab_in, d_zone, zone_amt, skin_protect, p: Params, offset, chroma_lim=1.35, is_skin=False):
+    def _bake_one(lab_in, d_zone, zone_amt, skin_protect, p: Params, offset, chroma_lim=1.2, is_skin=False, guard=None, hue_k=None):
         N = lab_in.shape[0]; _, S = C.grid_lab(N)
         O = lab_in.copy(); zw = C.zone_w(O[..., 0])
+        if guard is not None: O[..., 1:] = O[..., 1:]@guard[0] + guard[1]
+        if hue_k is not None: O[..., 1:] = _apply_hue_chroma(O[..., 1:], hue_k)
         for i in range(3): O[..., 1:] += zone_amt*0.7*d_zone[i]*zw[i][..., None]
         O[..., 0] += offset[0]*np.clip(O[..., 0]/50, 0, 1); O[..., 1] += offset[1]; O[..., 2] += offset[2]
         O[..., 0] += 12*p.shadows*zw[0] + 12*p.highlights*zw[2]
@@ -211,15 +313,17 @@ class Engine:
             f = (1 + p.vibrance*np.clip(1-Cc/55, 0, 1)*prot)*(1 + p.saturation)
             O[..., 1] *= f; O[..., 2] *= f
         rgb = cv2.cvtColor(O.reshape(-1, 1, 3).astype(np.float32), cv2.COLOR_LAB2RGB).reshape(N, N, N, 3)
-        return np.clip(rgb, 0, 1).astype(np.float32)
+        rgb = np.clip(rgb, 0, 1)
+        if p.wide > 0: rgb = rgb + p.wide*(wide_gamut_look(rgb) - rgb)
+        return rgb.astype(np.float32)
 
     def bake(self, fit: Fit, p: Params):
         cache = getattr(fit, "_lut_cache", None)
         key = p.colour_key()
         if cache is not None and key in cache: return cache[key]
         o = fit.offset
-        luts = (self._bake_one(fit.glob, fit.d_zone, 1.0, 0, p, o),
-                self._bake_one(fit.skin, fit.d_zone, 0.3, 0.25, p, (o[0], o[1]*0.5, o[2]*0.5), is_skin=True))
+        luts = (self._bake_one(fit.glob, fit.d_zone, 1.0, 0, p, o, guard=fit.guard_bg, hue_k=fit.hue_k),
+                self._bake_one(fit.skin, fit.d_zone, 0.3, 0.25, p, (o[0], o[1]*0.5, o[2]*0.5), is_skin=True, guard=fit.guard_skin))
         if cache is not None:
             if len(cache) > 16: cache.clear()
             cache[key] = luts
@@ -255,15 +359,7 @@ class Engine:
         out = R.render(src, lut_bg, lut_sk, mq, gain)
         T["render_s"] = time.perf_counter()-t; t = time.perf_counter()
         if db_enabled and p.db > 0 and fit.faces_n:
-            m_full = cv2.resize(mq_raw, (W, H), interpolation=cv2.INTER_LINEAR) if H*W < 4e6 else None
-            for f in fit.faces_n:
-                x, y, w, h = f*W
-                x0, y0 = max(0, int(x-0.6*w)), max(0, int(y-0.4*h)); x1, y1 = min(W, int(x+1.6*w)), min(H, int(y+1.9*h))
-                if x1-x0 < 8 or y1-y0 < 8: continue
-                mc = m_full[y0:y1, x0:x1] if m_full is not None else \
-                     cv2.resize(mq_raw[y0//4:(y1+3)//4, x0//4:(x1+3)//4], (x1-x0, y1-y0), interpolation=cv2.INTER_LINEAR)
-                lab = C.dodge_burn(C.to_lab(out[y0:y1, x0:x1]), mc, [(x-x0, y-y0, w, h)], p.db)
-                out[y0:y1, x0:x1] = C.from_lab(lab)
+            out = _dodge_burn_region(out, mq_raw, [f*W for f in fit.faces_n], p.db)
         T["dodge_burn_s"] = time.perf_counter()-t
         return (out, mq_raw) if return_mask else out
 

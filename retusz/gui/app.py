@@ -23,7 +23,7 @@ SLIDERS = [  # key, label, from, to, display  (4 equal columns, fixed-width valu
     ("vignette", "Winieta", 0, 100, "pct"),
     ("shadows", "Cienie", -100, 100, "num"), ("highlights", "Światła", -100, 100, "num"), ("saturation", "Nasycenie", -100, 100, "num"),
     ("vibrance", "Jaskrawość", -100, 100, "num"),
-    ("db", "Dodge&Burn", 0, 100, "pct"), ("plastic", "Plastyka 3D", 0, 100, "pct"),
+    ("wide", "Pełne barwy", 0, 100, "pct"), ("db", "Dodge&Burn", 0, 100, "pct"), ("plastic", "Plastyka 3D", 0, 100, "pct"),
 ]
 BRUSH_MIN, BRUSH_MAX = 5, 600   # brush radius in original-image pixels
 BRUSH_MODES = ["Wył.", "Rozjaśnij", "Przyciemnij"]
@@ -119,14 +119,14 @@ class RetuszApp(ctk.CTk):
             s = T.slider(cell, lo, hi, number_of_steps=hi-lo, width=60, command=lambda v, k=key: self._slider(k, v))
             s.grid(row=1, column=0, sticky="ew")
             self.sliders[key] = (s, val, kind)
-        cell = ctk.CTkFrame(sl, fg_color=T.CARD); cell.grid(row=2, column=2, columnspan=2, sticky="ew", padx=8, pady=3)
+        cell = ctk.CTkFrame(sl, fg_color=T.CARD); cell.grid(row=2, column=3, sticky="ew", padx=8, pady=3)
         cell.grid_columnconfigure(0, weight=1)
-        T.label(cell, "Kierunek światła", 13, anchor="w").grid(row=0, column=0, sticky="w")
-        box, self.light_val = value_box(cell, 150); box.grid(row=1, column=1, padx=(6, 0))
+        T.label(cell, "Światło 3D", 13, anchor="w").grid(row=0, column=0, sticky="w")
+        self.light_auto = ctk.CTkSwitch(cell, text="Auto", progress_color=T.ACCENT, text_color=T.TEXT, width=60,
+                                        switch_width=30, switch_height=14, font=T.font(11), command=self._light_auto)
+        self.light_auto.grid(row=0, column=1, sticky="e")
+        box, self.light_val = value_box(cell, 62); box.grid(row=1, column=1, padx=(6, 0))
         self.light = T.slider(cell, 0, 355, number_of_steps=71, width=60, command=self._light); self.light.grid(row=1, column=0, sticky="ew")
-        self.light_auto = ctk.CTkSwitch(cell, text="Auto", progress_color=T.ACCENT, text_color=T.TEXT, width=70,
-                                        font=T.font(12), command=self._light_auto)
-        self.light_auto.grid(row=1, column=2, padx=(10, 0))
         br = ctk.CTkFrame(ctl, fg_color=T.CARD)
         T.label(br, "Pędzel dodge/burn", 13).grid(row=0, column=0, columnspan=3, sticky="w")
         self.brush_mode = T.segmented(br, BRUSH_MODES, command=lambda v: self.view_res.delete("cursor")); self.brush_mode.set(BRUSH_MODES[0])
@@ -356,14 +356,14 @@ class RetuszApp(ctk.CTk):
 
     @staticmethod
     def _dir_name(a):
-        names = ["z prawej", "z prawej z góry", "z góry", "z lewej z góry", "z lewej", "z lewej z dołu", "z dołu", "z prawej z dołu"]
+        names = ["→", "↗", "↑", "↖", "←", "↙", "↓", "↘"]   # where the light comes from (short: fixed-width box)
         return names[int(((a % 360)+22.5)//45) % 8]
 
     def _show_light(self):
         auto = self.params.light_angle is None
         a = self._auto_angle() if auto else self.params.light_angle
         if auto: self.light.set(a)
-        self.light_val.configure(text=f"{int(a)}° · {self._dir_name(a)}")
+        self.light_val.configure(text=f"{int(a)}° {self._dir_name(a)}")
         self.light.configure(state="disabled" if auto else "normal")
 
     def _light(self, v):

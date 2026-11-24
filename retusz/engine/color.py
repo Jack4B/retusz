@@ -61,7 +61,7 @@ def smooth_lut(lut):
 def mkl_fit(S, R):
     """Monge-Kantorovich linear map between two LAB point clouds. Returns (mu_s, mu_r, T)."""
     S = S.astype(np.float64); R = R.astype(np.float64)
-    A, B = np.cov(S.T)+np.eye(3)*1e-3, np.cov(R.T)+np.eye(3)*1e-3
+    n = S.shape[1]; A, B = np.cov(S.T)+np.eye(n)*1e-3, np.cov(R.T)+np.eye(n)*1e-3
     Da2, Ua = np.linalg.eigh(A); Da = np.diag(np.sqrt(np.clip(Da2, 1e-9, None)))
     C = Da@Ua.T@B@Ua@Da; Dc2, Uc = np.linalg.eigh(C); Dc = np.diag(np.sqrt(np.clip(Dc2, 1e-9, None)))
     Di = np.diag(1/np.diag(Da)); T = Ua@Di@Uc@Dc@Uc.T@Di@Ua.T

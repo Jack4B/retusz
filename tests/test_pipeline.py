@@ -9,7 +9,7 @@ def test_params_from_dict_clamps_and_ignores_unknown():
     p = Params.from_dict({"strength": 3, "shadows": -5, "db": -1, "light_angle": 400, "bogus": 1})
     assert p.strength == 1 and p.shadows == -1 and p.db == 0 and p.light_angle == 40
     assert Params.from_dict(None) == Params()
-    assert Params().db == 0.4 and Params().plastic == 0.6 and Params().light_angle is None
+    assert Params().db == 0.4 and Params().plastic == 0.3 and Params().light_angle is None
 
 def test_brush_map_signs():
     m = brush_map([{"mode": "dodge", "size": 0.05, "strength": 1, "points": [[0.25, 0.5], [0.3, 0.5]]},
@@ -75,3 +75,19 @@ def test_real_photos_light_model_quality_and_speed():
     assert C.swd(out, bc) < 0.2*C.swd(a, bc)
     assert C.de_mean(out, bc) < 2.0
     assert dt < 5.0, f"24 Mpx took {dt:.1f} s"
+
+def test_dodge_burn_has_no_seams_between_close_faces():
+    """Regression (0.1.0 export): overlapping per-face crops left hard vertical/horizontal seams on faces."""
+    import cv2
+    from retusz.engine.pipeline import _dodge_burn_region
+    rng = np.random.default_rng(1); H, W = 600, 900
+    base = np.dstack([np.full((H, W), v, np.float32) for v in (200, 150, 120)])
+    blot = cv2.GaussianBlur(rng.normal(0, 25, (H, W)).astype(np.float32), (0, 0), 6)[..., None]
+    img = np.clip(base + blot, 0, 255).astype(np.uint8)
+    mq = np.ones((H//4, W//4), np.float32)
+    faces = [(250, 200, 160, 200), (390, 180, 160, 200), (520, 230, 150, 190)]      # overlapping crops
+    out = _dodge_burn_region(img, mq, faces, 0.8)
+    d = out.astype(np.float32).mean(2) - img.astype(np.float32).mean(2)
+    col = np.abs(np.diff(d, axis=1)).mean(0); row = np.abs(np.diff(d, axis=0)).mean(1)
+    assert np.abs(d[200:400, 300:600]).mean() > 0.3                 # D&B did something
+    assert col.max() < 3*np.median(col) + 0.1 and row.max() < 3*np.median(row) + 0.1   # no line-like steps

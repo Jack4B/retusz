@@ -107,3 +107,20 @@ def test_device_cpu_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(device, "MODE", "cpu")
     s = device.make_session(bundled_model("face_detection_yunet_2023mar.onnx"), device.zeros_feed)
     assert s.get_providers() == ["CPUExecutionProvider"] and device.summary() == "procesor (CPU)"
+
+def test_wide_look_matches_unmanaged_widegamut_display():
+    """'Pełne barwy' 100% = sRGB numbers viewed unmanaged on an AdobeRGB display (within clipping)."""
+    from retusz.engine.pipeline import wide_gamut_look
+    x = synth(seed=4)
+    ref = CM.convert(x, ADOBE, None).astype(int)                      # what the eye gets from the old preview
+    got = (wide_gamut_look(x.astype(np.float32)/255)*255+0.5).astype(int)
+    inside = (ref > 2).all(-1) & (ref < 253).all(-1)                   # compare where nothing clipped
+    assert np.abs(got[inside]-ref[inside]).mean() < 2.5
+    gray = np.full((4, 4, 3), 0.5, np.float32); assert np.abs(wide_gamut_look(gray)-0.5).max() < 0.02
+
+def test_wide_param_increases_chroma():
+    muted = lambda x: (x.astype(np.float32)*0.5 + 64).astype(np.uint8)      # typical photo colours, inside sRGB
+    e = Engine(None, "classic", depth_ai=False); src = muted(synth(seed=1)); fit = e.fit(src, e.analyse_reference(muted(synth(seed=2))))
+    b = Params(db=0, plastic=0, vignette=0); w = Params(db=0, plastic=0, vignette=0, wide=1.0)
+    ch = lambda x: np.hypot(*C.to_lab(x)[..., 1:].transpose(2, 0, 1)).mean()
+    assert ch(e.render(src, fit, w)) > ch(e.render(src, fit, b))*1.1
