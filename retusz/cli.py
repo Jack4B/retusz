@@ -1,12 +1,19 @@
 """Headless batch: python -m retusz cli <folder|photo> --reference ref.jpg [--out DIR] [--quality 95]"""
-import argparse, time
+import argparse, sys, time
 from pathlib import Path
 from . import imageio, models, batch, export
 from .reference import Reference
 from .engine.pipeline import Engine
 from .sidecar import Series
 
+def _utf8_console():
+    """Polish text must not crash on cp1252/cp852 Windows consoles."""
+    for st in (sys.stdout, sys.stderr):
+        try: st.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError): pass
+
 def main(argv=None):
+    _utf8_console()
     ap = argparse.ArgumentParser(prog="retusz cli")
     ap.add_argument("path"); ap.add_argument("--reference", "-r", required=True)
     ap.add_argument("--out"); ap.add_argument("--quality", type=int, default=95)
