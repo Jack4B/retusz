@@ -91,3 +91,24 @@ def test_dodge_burn_has_no_seams_between_close_faces():
     col = np.abs(np.diff(d, axis=1)).mean(0); row = np.abs(np.diff(d, axis=0)).mean(1)
     assert np.abs(d[200:400, 300:600]).mean() > 0.3                 # D&B did something
     assert col.max() < 3*np.median(col) + 0.1 and row.max() < 3*np.median(row) + 0.1   # no line-like steps
+
+def test_skin_mask_does_not_depend_on_resolution_with_noisy_raw():
+    """Regression (0.1.3, his D700 NEF): unprocessed sensor noise let dark pixels pass the skin-colour test
+    far more often at full resolution than in the 1600 px preview (shadow mask 0.48 vs 0.27), so the skin
+    LUT lifted the export's shadows by +1.2 L* compared with the preview."""
+    import cv2
+    rng = np.random.default_rng(3); H, W = 1600, 2400
+    y, x = np.mgrid[0:H, 0:W]
+    img = np.empty((H, W, 3), np.float32); img[:] = (60, 55, 50)                   # dark shadow, Cr 130.6: just outside the skin range
+    face = ((x-1200)/260)**2 + ((y-700)/330)**2 < 1; img[face] = (205, 150, 125)   # a face
+    full = np.clip(img + rng.normal(0, 14, img.shape), 0, 255).astype(np.uint8)    # high-ISO noise
+    prev = cv2.resize(full, (W//3*2//2, H//3*2//2), interpolation=cv2.INTER_AREA)   # 'preview' at 1/3
+    e = Engine(None, "classic", depth_ai=False)
+    fit = e.fit(prev, e.analyse_reference(synth(seed=2)))
+    fit.faces_n = [np.array([940, 370, 520, 660], np.float64)/W]            # faces are normalised to image width
+    _, mp = e.render(prev, fit, Params(db=0, plastic=0, skin_even=0, vignette=0), return_mask=True)
+    _, mf = e.render(full, fit, Params(db=0, plastic=0, skin_even=0, vignette=0), return_mask=True)
+    mf = cv2.resize(mf, (mp.shape[1], mp.shape[0]), interpolation=cv2.INTER_AREA)
+    shadow = cv2.resize((~face).astype(np.uint8), (mp.shape[1], mp.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
+    assert abs(float(mf[shadow].mean()) - float(mp[shadow].mean())) < 0.02
+    assert abs(float(mf[~shadow].mean()) - float(mp[~shadow].mean())) < 0.05

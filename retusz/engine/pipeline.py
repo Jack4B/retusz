@@ -85,6 +85,18 @@ class Fit:
     guard_skin: tuple = None   # closed-loop skin a/b correction (A, b)
     hue_k: object = None       # background per-hue chroma ratios (HUE_SECTORS)
 
+MASK_SIDE = 400   # skin mask working size (long side) for every resolution
+
+def skin_mask_fixed(src, faces_n, qh, qw):
+    """Skin mask computed at a fixed working size and returned at (qh, qw). Resolution independent on
+    purpose: with noisy input (RAW, no in-camera noise reduction) the colour test passed far more shadow
+    pixels at full resolution than in the preview, so the export's shadows got the skin LUT."""
+    H, W = src.shape[:2]; s = min(1.0, MASK_SIDE/max(H, W))
+    mw, mh = max(2, round(W*s)), max(2, round(H*s))
+    small = src if (mh, mw) == (H, W) else cv2.resize(src, (mw, mh), interpolation=cv2.INTER_AREA)
+    m = F.skin_mask(small, [f*mw for f in faces_n]).astype(np.float32)
+    return m if (mh, mw) == (qh, qw) else cv2.resize(m, (qw, qh), interpolation=cv2.INTER_LINEAR)
+
 def brush_map(strokes, h, w):
     """Rasterise brush strokes into a signed map (-1 burn .. +1 dodge) at h x w.
     Stroke = {"mode": "dodge"|"burn", "size": radius as fraction of width, "strength": flow 0..1, "softness": 0..1,
@@ -346,8 +358,7 @@ class Engine:
         H, W = src.shape[:2]; qh, qw = max(2, H//4), max(2, W//4)
         lut_bg, lut_sk = self.bake(fit, p)
         q = cv2.resize(src, (qw, qh), interpolation=cv2.INTER_AREA)
-        fq = [f*qw for f in fit.faces_n]
-        mq_raw = F.skin_mask(q, fq).astype(np.float32)
+        mq_raw = skin_mask_fixed(src, fit.faces_n, qh, qw)
         mq = mq_raw*p.skin
         gain = np.zeros((qh, qw, 3), np.float32)
         need_vig = p.vignette > 0 and np.any(fit.vig_diff < 0)
