@@ -54,15 +54,18 @@ def resize_long_edge(rgb, long_edge):
 def sharpen(rgb, radius, amount, threshold, skin_mask=None, skin_protect=0.6):
     """Unsharp mask on luminance (no colour fringes), soft threshold, reduced on skin."""
     if amount <= 0: return rgb
-    f = rgb.astype(np.float32)
-    Y = f @ np.array([0.299, 0.587, 0.114], np.float32)
+    Y = cv2.transform(rgb.astype(np.float32), np.array([[0.299, 0.587, 0.114]], np.float32))
     d = Y - cv2.GaussianBlur(Y, (0, 0), max(0.3, radius))
-    if threshold > 0: d *= np.clip((np.abs(d)-threshold*0.5)/max(threshold*0.5, 1e-3), 0, 1)
-    k = np.full(Y.shape, amount, np.float32)
+    if threshold > 0:
+        t = threshold*0.5
+        d *= np.clip((np.abs(d) - t)*(1/max(t, 1e-3)), 0, 1)
+    d *= amount
     if skin_mask is not None and skin_protect > 0:
         m = cv2.resize(skin_mask.astype(np.float32), (Y.shape[1], Y.shape[0]), interpolation=cv2.INTER_LINEAR)
-        k *= 1 - skin_protect*np.clip(m, 0, 1)
-    return np.clip(f + (k*d)[..., None] + 0.5, 0, 255).astype(np.uint8)
+        d *= 1 - skin_protect*np.clip(m, 0, 1)
+    d16 = np.round(d).astype(np.int16)                    # integer add: much less memory traffic than float RGB
+    out = rgb.astype(np.int16); out += d16[..., None]
+    return np.clip(out, 0, 255).astype(np.uint8)
 
 def _exif(meta, mode):
     raw = meta.get("exif")

@@ -99,10 +99,14 @@ def skin_even_gain(rgb_q, lab_q, mask, faces_q, amount):
     m = (mask > 0.3).astype(np.float32)
     if m.sum() < 50: return np.zeros(rgb_q.shape, np.float32)
     fw = float(np.median([f[2] for f in faces_q])) if faces_q else rgb_q.shape[1]/20
-    sg = max(1.0, fw*0.5)
-    den = cv2.GaussianBlur(m, (0, 0), sg) + 1e-4
-    ab = lab_q[..., 1:]
-    low = np.dstack([cv2.GaussianBlur(ab[..., c]*m, (0, 0), sg)/den for c in range(2)])
+    ab = lab_q[..., 1:]; H, W = m.shape
+    k = max(1.0, fw/32)                       # low-frequency field: compute where the face is ~32 px wide
+    sw, sh = max(4, round(W/k)), max(4, round(H/k))
+    ms = cv2.resize(m, (sw, sh), interpolation=cv2.INTER_AREA); abs_ = cv2.resize(np.ascontiguousarray(ab*m[..., None]), (sw, sh), interpolation=cv2.INTER_AREA)
+    sg = max(1.0, fw/k*0.5)
+    den = cv2.GaussianBlur(ms, (0, 0), sg) + 1e-4
+    low = cv2.GaussianBlur(abs_, (0, 0), sg)/den[..., None]
+    low = cv2.resize(low, (W, H), interpolation=cv2.INTER_LINEAR)
     w = mask > 0.5
     target = np.median(ab[w], axis=0) if w.sum() > 20 else (ab*m[..., None]).reshape(-1, 2).sum(0)/m.sum()
     corr = (target - low)
