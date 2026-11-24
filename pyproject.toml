@@ -1,6 +1,6 @@
 [project]
 name = "retusz"
-version = "0.1.2"
+version = "0.1.3"
 description = "Dopasowanie kolorów do wzorca, Plastyka 3D i subtelny dodge & burn"
 authors = [{ name = "Jack4B" }]
 requires-python = ">=3.11"

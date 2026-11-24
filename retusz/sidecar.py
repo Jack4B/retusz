@@ -27,6 +27,11 @@ def _read_json(path: Path):
     except (OSError, ValueError):
         return None
 
+def _per_photo_only(p: Params) -> Params:
+    """Brush strokes, straighten and crop always belong to one photo, never to the series."""
+    p.strokes = []; p.angle = 0.0; p.crop = None
+    return p
+
 class Series:
     def __init__(self, folder):
         self.folder = Path(folder); self.reference: Path | None = None; self.params = Params()
@@ -37,14 +42,14 @@ class Series:
                 rp = Path(ref); rp = rp if rp.is_absolute() else self.folder / rp
                 self.reference = rp
             self.params = Params.from_dict(d.get("params"))
-            self.params.strokes = []  # strokes are always per photo
+            _per_photo_only(self.params)
 
     def save(self):
         ref = None
         if self.reference:
             try: ref = str(Path(self.reference).resolve().relative_to(self.folder.resolve()))
             except ValueError: ref = str(Path(self.reference).resolve())
-        p = self.params.to_dict(); p["strokes"] = []
+        p = _per_photo_only(Params.from_dict(self.params.to_dict())).to_dict()
         _write_json(self.folder / SERIES_FILE, {"version": VERSION, "app": "Retusz", "reference": ref, "params": p})
 
     def has_override(self, photo) -> bool:
@@ -62,3 +67,14 @@ class Series:
     def clear_override(self, photo):
         try: sidecar_path(photo).unlink()
         except FileNotFoundError: pass
+
+    def sync_fields(self, photos, values: dict):
+        """Copy some controls (e.g. white balance) to the series defaults and to every photo that has
+        its own settings; photos without a sidecar follow the series anyway."""
+        for k, v in values.items(): setattr(self.params, k, v)
+        self.params = Params.from_dict(self.params.to_dict()); self.save()
+        for ph in photos:
+            if self.has_override(ph):
+                p = self.params_for(ph)
+                for k, v in values.items(): setattr(p, k, v)
+                self.set_override(ph, Params.from_dict(p.to_dict()))

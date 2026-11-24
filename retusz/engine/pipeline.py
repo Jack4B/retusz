@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass, field, asdict, fields
 import numpy as np, cv2
 from . import color as C, faces as F, render as R, modflows as MF, relight as RL
+from . import wb as WB, geometry as GEO
 
 GRID = 33
 ANALYSIS_SIDE = 1200   # masks, zones, vignette, skin statistics
@@ -30,6 +31,11 @@ class Params:
     vibrance: float = 0.0           # 'Jaskrawość' -1..1 (boosts dull colours, spares skin)
     skin_even: float = 0.3          # 'Równanie skóry' 0..1 (local colour casts on skin, mixed light)
     wide: float = 0.0               # 'Pełne barwy' 0..1: colours as sRGB numbers look on a wide-gamut (AdobeRGB) monitor
+    temp: float = 0.0               # 'Temperatura' -1..1 (white balance, see wb.py)
+    tint: float = 0.0               # 'Odcień' -1..1 (+ = magenta)
+    angle: float = 0.0              # straighten, degrees -45..45 (per photo, see geometry.py)
+    crop: list | None = None        # [x0, y0, x1, y1] normalised in the straightened frame (per photo)
+    aspect: str = "orig"            # crop preset key (geometry.ASPECTS)
     strokes: list = field(default_factory=list)  # manual dodge/burn, see brush_map()
 
     def to_dict(self):
@@ -42,13 +48,16 @@ class Params:
         if p.light_angle is not None: p.light_angle = float(p.light_angle) % 360
         for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even", "wide"):
             setattr(p, k, float(np.clip(getattr(p, k), 0, 1)))
-        for k in ("shadows", "highlights", "saturation", "vibrance"):
+        for k in ("shadows", "highlights", "saturation", "vibrance", "temp", "tint"):
             setattr(p, k, float(np.clip(getattr(p, k), -1, 1)))
         p.strokes = list(p.strokes or [])
+        p.angle = float(np.clip(p.angle or 0.0, -45, 45))
+        p.crop = GEO.clamp_crop(p.crop)
+        if p.aspect not in GEO.ASPECTS: p.aspect = "orig"
         return p
 
     def colour_key(self):
-        return tuple(round(getattr(self, k), 3) for k in ("strength", "shadows", "highlights", "saturation", "vibrance", "wide"))
+        return tuple(round(getattr(self, k), 3) for k in ("strength", "shadows", "highlights", "saturation", "vibrance", "wide", "temp", "tint"))
 
 @dataclass
 class RefAnalysis:
@@ -314,6 +323,7 @@ class Engine:
             O[..., 1] *= f; O[..., 2] *= f
         rgb = cv2.cvtColor(O.reshape(-1, 1, 3).astype(np.float32), cv2.COLOR_LAB2RGB).reshape(N, N, N, 3)
         rgb = np.clip(rgb, 0, 1)
+        if p.temp or p.tint: rgb = WB.apply01(rgb, p.temp, p.tint)
         if p.wide > 0: rgb = rgb + p.wide*(wide_gamut_look(rgb) - rgb)
         return rgb.astype(np.float32)
 

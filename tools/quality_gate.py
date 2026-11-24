@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from retusz import imageio, models, colorman as CM, export as EX
 from retusz.reference import Reference
 from retusz.engine.pipeline import Engine, Params
+from retusz.engine import geometry as G
+from retusz import batch
 from retusz.engine import color as C, faces as F
 
 def colourfulness(rgb):
@@ -83,14 +85,27 @@ def run_pair(eng, src_p, ref_p, out, idx):
         res["stages"][name] = {"stats": o, "fails": f}
         print(f"  {name:18s}: {fmt(o)}\n  {'':18s}  {'OK' if not f else 'FAIL: ' + '; '.join(f)}")
         tiles.append(label(Image.fromarray(C.small(CM.convert(o_rgb, icc, None), 700)), name + (" ✓" if not f else " ✗")))
-    # preview == export (export downscaled, colour-managed comparison in sRGB)
+    # preview == export (export downscaled, colour-managed comparison in sRGB), for the defaults and for
+    # white balance and straighten + crop (0.1.3); the export goes through the real batch.export_one path
     prev, picc = imageio.load_preview(src_p, 1600, with_icc=True); fp = eng.fit(prev, ref.analysis(eng, picc))
-    P = CM.convert(eng.render(prev, fp, Params()), picc, None)
-    dst = EX.save(out/f"export_{idx}.jpg", eng.render(rgb, fit, Params()), meta, EX.ExportOptions(sharpen="off", quality=98))
-    im = Image.open(dst); E = CM.convert(np.asarray(im.convert("RGB")), im.info.get("icc_profile"), None)
-    E = cv2.resize(E, (P.shape[1], P.shape[0]), interpolation=cv2.INTER_AREA)
-    de = float(np.linalg.norm(C.to_lab(P)-C.to_lab(E), axis=2).mean()); res["preview_vs_export_dE"] = de
-    print(f"  podgląd vs eksport: dE {de:.2f} {'OK' if de < 1.0 else 'FAIL'}")
+    cases = {"domyślne": Params(), "balans bieli": Params(temp=0.3, tint=-0.15),
+             "prostowanie+kadr": Params(angle=4.0, aspect="4:5", crop=G.aspect_rect("4:5", rgb.shape[1], rgb.shape[0], True))}
+    res["pve"] = {}
+    for cname, cp in cases.items():
+        P = eng.render(prev, fp, cp)
+        geo = bool(cp.angle or cp.crop is not None)
+        if geo: P = G.apply(P, cp.angle, cp.crop, interp=cv2.INTER_CUBIC)   # what the GUI shows
+        P = CM.convert(P, picc, None)
+        dst = batch.export_one(eng, ref, src_p, cp, out/f"export_{idx}", EX.ExportOptions(sharpen="off", quality=98, suffix="_"+cname.replace(" ", "_").replace("+", "_")), fit=fit)
+        im = Image.open(dst); E = CM.convert(np.asarray(im.convert("RGB")), im.info.get("icc_profile"), None)
+        E = cv2.resize(E, (P.shape[1], P.shape[0]), interpolation=cv2.INTER_AREA)
+        de = float(np.linalg.norm(C.to_lab(P)-C.to_lab(E), axis=2).mean()); note = ""
+        if geo:   # a rotated 1600 px preview is resampled once more than the export: compare colour, not sharpness
+            b = lambda x: cv2.GaussianBlur(x, (0, 0), 1.0)
+            raw = de; de = float(np.linalg.norm(C.to_lab(b(P))-C.to_lab(b(E)), axis=2).mean()); note = f" (kolor po rozmyciu 1 px; ostrość: {raw:.2f})"
+        res["pve"][cname] = de
+        print(f"  podgląd vs eksport [{cname}]: dE {de:.2f} {'OK' if de < 1.0 else 'FAIL'}{note}  ({im.size[0]}×{im.size[1]})")
+    res["preview_vs_export_dE"] = max(res["pve"].values())
     sheet = grid(tiles, 3)
     faces = F.pick_faces(C.small(CM.convert(rgb, icc, None), 700))
     if faces:   # face close-ups: union of all faces, padded, from every tile (reference by its own faces)

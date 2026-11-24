@@ -17,7 +17,7 @@ class ImageView(tk.Canvas):
         self.rgb = None; self.icc = None; self.full_wh = None; self.detail = None
         self.zoom = None; self.center = [0.5, 0.5]; self.geom = (0, 0, 1, 1)
         self._photo = None; self._disp = None; self.placeholder = placeholder
-        self.on_view_change = None
+        self.on_view_change = None; self.on_redraw = None
         self.bind("<Configure>", lambda e: self.redraw())
 
     # ----- content -----
@@ -109,3 +109,4 @@ class ImageView(tk.Canvas):
         self._photo = ImageTk.PhotoImage(Image.fromarray(img))
         self.create_image(x0 + a0/sw*dw, y0 + b0/sh*dh, image=self._photo, anchor="nw", tags="img")
         self.tag_lower("img")
+        if self.on_redraw: self.on_redraw()

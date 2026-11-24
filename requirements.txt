@@ -5,3 +5,4 @@ numba>=0.60
 customtkinter>=5.2
 onnxruntime>=1.18 ; sys_platform != "win32"
 onnxruntime-directml>=1.18 ; sys_platform == "win32"
+rawpy>=0.22

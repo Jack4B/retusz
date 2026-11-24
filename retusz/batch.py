@@ -1,9 +1,11 @@
 """Batch export of a series: one reference, per-photo fit + overrides, advanced JPG export."""
 from __future__ import annotations
 import time
+import numpy as np, cv2
 from pathlib import Path
 from . import imageio, export
 from .engine.pipeline import Engine
+from .engine import geometry as G
 from .reference import Reference
 from .sidecar import Series
 
@@ -15,6 +17,9 @@ def export_one(engine: Engine, reference: Reference, photo, params, out_dir, opt
     if fit is None:
         fit = engine.fit(rgb, reference.analysis(engine, meta.get("icc_profile")))
     out, mask_q = engine.render(rgb, fit, params, return_mask=True)
+    if params.angle or params.crop is not None:
+        out = G.apply(out, params.angle, params.crop)
+        mask_q = G.apply(mask_q.astype(np.float32), params.angle, params.crop, interp=cv2.INTER_LINEAR)
     return export.save(dst, out, meta, opts, skin_mask=mask_q)
 
 def export_series(engine: Engine, reference: Reference, series: Series, photos, out_dir, opts=None,

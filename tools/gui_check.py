@@ -1,4 +1,5 @@
-"""Headless GUI check (xvfb-run): layout stability while dragging the light slider, zoom/pan, brush coordinates.
+"""Headless GUI check (xvfb-run): layout stability (light/angle sliders, tool tabs, clipping overlay), zoom/pan,
+brush coordinates (also on a straightened photo), crop drag with aspect, horizon tool, eyedropper.
 Usage: gui_check.py <folder> <reference> <outdir>"""
 import sys, time
 from pathlib import Path
@@ -25,7 +26,15 @@ def wait_result(t=90):
 
 def geom():
     return {k: (s.winfo_x(), s.winfo_width(), s.master.winfo_width()) for k, (s, _, _) in app.sliders.items()} | \
-           {"light": (app.light.winfo_x(), app.light.winfo_width())}
+           {"light": (app.light.winfo_x(), app.light.winfo_width()), "hist": (app.hist.winfo_rootx(), app.hist.winfo_rooty()),
+            "tabs": (app.tool_tabs.winfo_rootx(), app.tool_tabs.winfo_width()), "res": (app.view_res.winfo_width(), app.view_res.winfo_height())}
+
+class E: pass
+def ev(x, y, state=0):
+    e = E(); e.x, e.y, e.state, e.delta = x, y, state, 0; return e
+
+def canvas_xy(v, u, w_):
+    x0, y0, dw, dh = v.geom; return x0+u*dw, y0+w_*dh
 
 def script():
     global ok
@@ -60,6 +69,8 @@ def script():
     if abs(st["points"][0][0]-u1[0]) > 0.005: ok = False
     app._brush_step(1); print("after ]:", app.brush_vals["size"].cget("text"))
     app.zoom_fit(); pump(5); print("fit zoom", app.zoom_lbl.cget("text"))
+    app.brush_mode.set("Wył."); app.undo_stroke(); wait_render()
+    new_features()
     from retusz.gui.dialogs import SettingsDialog
     d = SettingsDialog(app, app.settings, lambda: None); pump(20); grab("13_ustawienia_ogolne.png", d)
     d.children; 
@@ -68,5 +79,78 @@ def script():
     pump(10); grab("14_ustawienia_eksport.png", d); d.destroy()
     print("RESULT", "OK" if ok else "FAIL", flush=True)
     app.destroy()
+
+def wait_render(t=30):
+    pump(5); t0 = time.time()
+    while app._gen.get("render") and not app._jobs.empty() and time.time()-t0 < t: app.update(); time.sleep(0.05)
+    pump(25)
+
+def new_features():
+    global ok
+    from retusz.engine import geometry as G, wb as WB
+    import numpy as np
+    g0 = geom(); v = app.view_res
+    # histogram + clipping overlay
+    hist_ok = app.frame is not None and app.hist.find_all()
+    app.toggle_clip(True); pump(5); grab("15_przepalenia.png")
+    print("histogram drawn:", bool(hist_ok), "| clip label:", app.clip_lbl.cget("text"))
+    app.toggle_clip(False); pump(3)
+    if geom() != g0: print("LAYOUT CHANGED by clipping toggle"); ok = False
+    # eyedropper: on a bright neutral-ish area of the result frame
+    import cv2
+    f = app.frame.astype(np.float32); sat = f.max(-1) - f.min(-1); lum = f.mean(-1)
+    loc = cv2.blur(lum, (9, 9)); locsd = np.sqrt(np.maximum(cv2.blur(lum*lum, (9, 9)) - loc*loc, 0))
+    score = np.where((f.max(-1) < 235) & (lum > 70) & (locsd < 3), sat, 1e9); y, x = np.unravel_index(np.argmin(score), score.shape)
+    h, w = app.frame.shape[:2]
+    app.toggle_pick(True); pump(3); grab("17_pipeta.png")
+    r0 = app.result; cx, cy = canvas_xy(v, (x+0.5)/w, (y+0.5)/h); app._brush_press(ev(cx, cy))
+    t0 = time.time()
+    while app.result is r0 and time.time()-t0 < 30: app.update(); time.sleep(0.05)
+    pump(5); px, py = app._last_pick
+    d2 = WB.solve(app.frame[max(0, py-3):py+4, max(0, px-3):px+4])
+    print(f"eyedropper at {px},{py} (local sd {locsd[y, x]:.1f}) -> temp {app.params.temp:+.3f} tint {app.params.tint:+.3f}; residual correction {d2}")
+    if d2 is None or max(abs(d2[0]), abs(d2[1])) > 0.02: ok = False
+    if geom() != g0: print("LAYOUT CHANGED by eyedropper"); ok = False
+    # crop tool
+    app.toggle_crop_tool(); pump(5)
+    if geom() != g0: print("LAYOUT CHANGED by tool tab", geom(), g0); ok = False
+    app._aspect(G.ASPECTS["2:3"]); pump(5)
+    W, H = app.src_size; c = app.params.crop; r = (c[2]-c[0])*W/((c[3]-c[1])*H)
+    print(f"aspect 2:3 preset -> crop ratio {r:.4f}")
+    if abs(r - (2/3 if H > W else 3/2)) > 0.01: ok = False
+    # drag a new crop from (0.2,0.2) to (0.7,0.9): must keep 2:3
+    a = canvas_xy(v, 0.2, 0.2); b = canvas_xy(v, 0.7, 0.9)
+    app.params.crop = None; app._brush_press(ev(*a)); app._brush_move(ev((a[0]+b[0])/2, (a[1]+b[1])/2)); app._brush_move(ev(*b)); pump(2)
+    grab("16_kadr_przeciaganie.png"); app._brush_release(ev(*b)); pump(3)
+    c = app.params.crop; r = (c[2]-c[0])*W/((c[3]-c[1])*H)
+    print("dragged crop", [round(t, 3) for t in c], f"ratio {r:.4f}")
+    if not (abs(r-2/3) < 0.01 or abs(r-1.5) < 0.01) or abs(c[0]-0.2) > 0.003: ok = False
+    # straighten via slider: layout must not move
+    for ang in (-10, -3.3, 0, 4.5, 2.0):
+        app.angle.set(ang); app._angle(ang); pump(2)
+        if geom() != g0: print("LAYOUT CHANGED by angle", ang); ok = False; break
+    print("angle label:", app.angle_val.cget("text"))
+    # horizon tool on a line tilted by +3 degrees in the frame -> angle += 3
+    a0 = app.params.angle; app.toggle_hline()
+    Wf, Hf = app._frame_wh(); L = 0.5*Wf; dy = np.tan(np.radians(3))*L
+    p1 = canvas_xy(v, 0.25, 0.5); p2 = canvas_xy(v, 0.75, 0.5 + dy/Hf)
+    app._brush_press(ev(*p1)); app._brush_move(ev(*p2)); app._brush_release(ev(*p2)); pump(5)
+    print(f"horizon: angle {a0:+.1f} -> {app.params.angle:+.1f} (expected {a0+3:+.1f})")
+    if abs(app.params.angle - (a0+3)) > 0.25: ok = False
+    wait_render(); grab("18_kadr_prostowanie.png")
+    app._crop_done(); pump(5); grab("19_kadr_gotowy.png")
+    # brush on a straightened view lands on the right source point
+    app.brush_mode.set("Rozjaśnij"); n = len(app.params.strokes)
+    q = canvas_xy(v, 0.55, 0.45); app._brush_press(ev(*q)); app._brush_move(ev(q[0]+1, q[1])); app._brush_release(ev(q[0]+1, q[1]))
+    st = app.params.strokes[n]["points"][0]; want = G.frame_to_src(v.to_norm(*q), app.params.angle, Wf, Hf)
+    print("rotated brush point", [round(t, 4) for t in st], "expected", [round(t, 4) for t in want])
+    if max(abs(st[0]-want[0]), abs(st[1]-want[1])) > 0.003: ok = False
+    app.undo_stroke(); app.brush_mode.set("Wył.")
+    # sidecar keeps the geometry
+    pump(20); time.sleep(0.4); pump(10)
+    sp = app.series.params_for(app.photos[app.idx])
+    print("sidecar crop/angle:", sp.crop is not None, sp.angle == app.params.angle)
+    if sp.crop is None or sp.angle != app.params.angle: ok = False
+    app.reset_crop(); app.reset_wb(); pump(5)
 
 app.after(500, script); app.mainloop()
