@@ -91,6 +91,7 @@ def run_pair(eng, src_p, ref_p, out, idx):
     # white balance and straighten + crop (0.1.3); the export goes through the real batch.export_one path
     prev, picc = imageio.load_preview(src_p, 1600, with_icc=True); fp = eng.fit(prev, ref.analysis(eng, picc))
     cases = {"domyślne": Params(), "balans bieli": Params(temp=0.3, tint=-0.15),
+             "ekspozycja+ton": Params(exposure=0.6, contrast=0.3, highlights=-0.25, shadows=0.3, whites=0.15, blacks=-0.15, clarity=0.4),
              "prostowanie+kadr": Params(angle=4.0, aspect="4:5", crop=G.aspect_rect("4:5", rgb.shape[1], rgb.shape[0], True))}
     res["pve"] = {}
     for cname, cp in cases.items():

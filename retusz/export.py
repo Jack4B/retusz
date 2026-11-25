@@ -52,9 +52,9 @@ def resize_long_edge(rgb, long_edge):
     return cv2.resize(rgb, (max(1, round(w*s)), max(1, round(h*s))), interpolation=cv2.INTER_AREA)
 
 def sharpen(rgb, radius, amount, threshold, skin_mask=None, skin_protect=0.6):
-    """Unsharp mask on luminance (no colour fringes), soft threshold, reduced on skin."""
+    """Unsharp mask on luminance (Rec.709, no colour fringes), soft threshold, reduced on skin."""
     if amount <= 0: return rgb
-    Y = cv2.transform(rgb.astype(np.float32), np.array([[0.299, 0.587, 0.114]], np.float32))
+    Y = cv2.transform(rgb.astype(np.float32), np.array([[0.2126, 0.7152, 0.0722]], np.float32))
     d = Y - cv2.GaussianBlur(Y, (0, 0), max(0.3, radius))
     if threshold > 0:
         t = threshold*0.5
