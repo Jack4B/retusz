@@ -1,8 +1,8 @@
 """Transfer grading + relighting from a low-resolution AI version onto the full-resolution original.
 
 prepare(): align (engine.align) -> AI resampled into the work frame -> map of places where the AI changed
-the picture's structure (local normalised cross-correlation of high-pass luminance, invariant to the
-AI's local gain) -> Bilateral Guided Upsampling fit original -> AI with those places and the area
+the picture's content (local normalised cross-correlation of band-pass luminance above each image's noise
+level, compact regions only; invariant to the AI's regrade, relight, smoothing and redrawn grain) -> Bilateral Guided Upsampling fit original -> AI with those places and the area
 outside the AI frame weighted 0 (they get the neighbours' / global transform, never AI content).
 render(): slice the grid on the full-resolution original in strips, then mix with the original in
 CIELAB: a*b* by `kolor`, L* by `jasnosc` x optional brush mask (Photoshop Color / Luminosity idea)."""
@@ -70,27 +70,70 @@ def to_lab(rgb01):
     return cv2.cvtColor(np.ascontiguousarray(np.clip(rgb01, 0, 1), np.float32), cv2.COLOR_RGB2Lab)
 
 # ---------------------------------------------------------------- changed-content map
-def _ncc_score(work, ai_w, hp_sigma, win, valid):
-    """Normalised convolution inside `valid` only: pixels outside the AI frame (replicated by remap) must not
-    lower the correlation of the windows next to the frame edge."""
+CHANGE_SCALES = (2.0, 5.0, 12.0)   # band centres, work px: finer bands hold only grain / redrawn micro-detail
+NOISE_K = 3.0                      # a band counts as structure above NOISE_K x its noise level
+CHANGE_MIN_AREA = 0.016            # side of the smallest changed region, fraction of the longer work side
+
+_NOISE_KERNEL = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], np.float32)
+
+def noise_sigma(g, valid):
+    """Noise std of a grey image (Immerkaer 1996, robust median form): grain of the camera original,
+    almost none in a regenerated AI copy."""
+    r = np.abs(cv2.filter2D(g, -1, _NOISE_KERNEL))[cv2.erode(valid, np.ones((5, 5), np.uint8)) > 0]
+    return float(np.median(r)/0.6745/6.0) if r.size else 0.0
+
+_BAND_GAIN = {}
+def _band(x, s, nblur): return nblur(x, 0.5*s) - nblur(x, 2.0*s)
+
+def _band_gain(s):
+    """Std of the band-pass response to unit white noise."""
+    if s not in _BAND_GAIN:
+        n = np.random.default_rng(0).standard_normal((384, 384)).astype(np.float32)
+        b = cv2.GaussianBlur(n, (0, 0), 0.5*s) - cv2.GaussianBlur(n, (0, 0), 2.0*s)
+        _BAND_GAIN[s] = float(b[64:-64, 64:-64].std())
+    return _BAND_GAIN[s]
+
+def _fill_regions(m, min_side):
+    """Binary regions of m > 0.5 at least min_side^2 in area, closed and with holes filled (float 0/1)."""
+    h, w = m.shape
+    n, lab, st, _ = cv2.connectedComponentsWithStats((m > 0.5).astype(np.uint8), connectivity=8)
+    keep = np.zeros(n, np.float32); keep[1:] = st[1:, cv2.CC_STAT_AREA] >= min_side**2
+    k = keep[lab]
+    r = max(3, int(round(0.75*min_side)))
+    k = cv2.morphologyEx(k, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2*r+1, 2*r+1)))
+    bg = np.pad((k <= 0.5).astype(np.uint8), 1, constant_values=1)
+    cv2.floodFill(bg, np.zeros((h+4, w+4), np.uint8), (0, 0), 2)     # outside = 2, holes stay 1
+    return np.maximum(k, (bg[1:-1, 1:-1] == 1).astype(np.float32))
+
+def changed_map(work, ai_w, valid, scales=CHANGE_SCALES):
+    """0..1 where the AI's structure does not follow the original's (removed / added / redrawn content).
+
+    Generative tools re-render the whole picture: grain disappears, pores, hair and fabric are redrawn,
+    everything drifts by a pixel or two. None of that is a content change, so (0.1.5):
+    - structure is compared in band-pass luminance bands (DoG, CHANGE_SCALES) by local normalised
+      cross-correlation, invariant to the AI's regrade and relight; the finest band starts at 1 work px
+      blur, below which there is only grain and redrawn micro-detail;
+    - a band only counts where either side has structure clearly above its *own* noise level (estimated per
+      image), so the original's grain against the AI's smooth surface is not "changed";
+    - only compact regions survive (area opening, closing, holes filled): redrawn content is blobby,
+      scattered specks are residual drift."""
     v = valid.astype(np.float32)
     def nblur(x, s): return cv2.GaussianBlur(x*v, (0, 0), s)/(cv2.GaussianBlur(v, (0, 0), s) + 1e-6)
-    def hp(x):
-        g = AL.gray(x); return (g - nblur(g, hp_sigma))*v
-    a, b = hp(work), hp(ai_w)
-    va, vb, cab = nblur(a*a, win), nblur(b*b, win), nblur(a*b, win)
-    ncc = cab/np.sqrt(va*vb + 0.004**4)
-    energy = np.sqrt(np.maximum(va, vb))
-    gate = np.clip((energy - 0.006)/0.010, 0, 1)
-    return np.clip((0.6 - ncc)/0.35, 0, 1)*gate*v
-
-def changed_map(work, ai_w, valid, scales=((1.5, 4.0), (5.0, 12.0))):
-    """0..1 where the AI's structure does not follow the original's (removed / added / redrawn), at a
-    fine and a medium scale. Local normalised cross-correlation ignores the AI's local gain and colour,
-    so regrading and relighting are not flagged."""
-    score = np.maximum.reduce([_ncc_score(work, ai_w, h, w, valid) for h, w in scales])
-    score = cv2.GaussianBlur(score, (0, 0), 2.0)
+    ga, gb = AL.gray(work), AL.gray(ai_w)
+    na, nb = noise_sigma(ga, v), noise_sigma(gb, v)
+    scores = []
+    for s in scales:
+        a, b = _band(ga, s, nblur)*v, _band(gb, s, nblur)*v
+        win = 2.5*s
+        va, vb, cab = nblur(a*a, win), nblur(b*b, win), nblur(a*b, win)
+        ncc = cab/np.sqrt(va*vb + 1e-12)
+        fa = max(0.004, NOISE_K*na*_band_gain(s)); fb = max(0.004, NOISE_K*nb*_band_gain(s))
+        gate = np.maximum(np.clip(np.sqrt(va)/fa - 1, 0, 1), np.clip(np.sqrt(vb)/fb - 1, 0, 1))
+        scores.append(np.clip((0.55 - ncc)/0.35, 0, 1)*gate*v)
+    score = cv2.GaussianBlur(np.maximum.reduce(scores), (0, 0), 2.0)
     m = np.clip((score - 0.25)/0.25, 0, 1)
+    regions = _fill_regions(m, CHANGE_MIN_AREA*max(m.shape))
+    m = np.maximum(m*cv2.dilate(regions, np.ones((9, 9), np.uint8)), regions)
     m = cv2.dilate(m, np.ones((5, 5), np.uint8))
     return (cv2.GaussianBlur(m, (0, 0), 1.5)*valid).astype(np.float32)
 

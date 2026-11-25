@@ -85,3 +85,44 @@ def test_ai_frame_border_is_not_flagged_as_changed():
     a[:30] = a[30]; a[-30:] = a[-31]; a[:, :40] = a[:, 40:41]; a[:, -40:] = a[:, -41:-40]
     ch = TR.changed_map(w, a, valid)
     assert float((ch*valid).sum()/valid.sum()) < 0.005
+
+
+# ---------------------------------------------------------------- generative AI (Gemini / Nano Banana style)
+@pytest.fixture(scope="module")
+def generative():
+    """Grainy portrait original; the AI copy is re-rendered: other framing, non-rigid drift, a moved 'person',
+    local relight + strong regrade, all fine detail redrawn and smoothed, and a redrawn poster (the only
+    real content change, ~7 % of the frame)."""
+    from synthetic import portrait_scene, make_generative, strong_grade, relight
+    o, _ = portrait_scene(1800, 1200, seed=1, grain=8)
+    lit = relight(o)
+    ai, ch = make_generative(lit, (700, 1050), shift=(6, -5), zoom=1.04, drift_amp=0.004,
+                             island=(0.58, 0.40, 0.14, 0.005, -0.003), regen=((0.08, 0.10, 0.33, 0.38),), fine=True)
+    prep = TR.prepare(o, ai)
+    ch_work = cv2.remap(ch, *prep.al.maps(), cv2.INTER_LINEAR)
+    return o, strong_grade(lit), ch_work, prep
+
+def test_generative_change_map_flags_only_the_redrawn_region(generative):
+    """0.1.4 flagged ~78 % of such a frame (fine-scale NCC reads smoothed/redrawn grain as changed content),
+    so almost nothing was transferred."""
+    o, gt, ch_work, prep = generative
+    core = cv2.erode(ch_work, np.ones((9, 9), np.uint8)) > 0.5
+    assert prep.changed_frac < 0.12, prep.changed_frac
+    assert prep.changed[core].mean() > 0.8, prep.changed[core].mean()
+
+def test_generative_light_and_colour_are_transferred(generative):
+    o, gt, ch_work, prep = generative
+    out = TR.render(prep, o, TR.TransferParams())
+    H, W = o.shape[:2]
+    away = cv2.dilate((cv2.resize(ch_work, (W, H)) > 0.01).astype(np.uint8), np.ones((31, 31), np.uint8)) == 0
+    m = (prep.coverage_full(o.shape) > 0.99) & away
+    de = TR.delta_e2000(_lab(out/255.)[m], _lab(gt/255.)[m]).mean()
+    de0 = TR.delta_e2000(_lab(o/255.)[m], _lab(gt/255.)[m]).mean()
+    assert de < 2.0 and de < 0.2*de0, (de, de0)
+
+def test_smoothed_ai_with_redrawn_fine_detail_is_not_flagged():
+    """Same picture, but the AI copy has no grain and its finest detail is redrawn: nothing changed."""
+    from synthetic import portrait_scene, regen_fine
+    o, _ = portrait_scene(900, 600, seed=2, grain=10)
+    ai = cv2.GaussianBlur(regen_fine(cv2.resize(o, (360, 540), interpolation=cv2.INTER_AREA), seed=5), (0, 0), 0.8)
+    assert TR.prepare(o, ai).changed_frac < 0.02
