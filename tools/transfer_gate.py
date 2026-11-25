@@ -1,20 +1,23 @@
 """Quality gate for the AI grading transfer (run via: quality_gate.py --transfer OUTDIR [photo.jpg|photo.NEF ...]).
 Ground truth GT = grade(original) (tone curve, colour matrix, smooth relight, sharp-edged local grade); the
 "AI version" is GT downscaled 2-4x, cropped, shifted, rotated, JPEG q90 (+ one non-rigid drift, one removed
-object, one identity case). Thresholds: see THRESH. Sheets: original 100 % | naive AI upscale | result | GT."""
+object, one identity case) + a generative case (grainy original; the AI copy is re-rendered: local relight and
+strong regrade, other framing, non-rigid drift, all fine detail redrawn and smoothed, one region redrawn - the
+change map must flag only that region and the result there must not show the AI's content (no ghost)).
+Thresholds: see THRESH. Sheets: original 100 % | naive AI upscale | result | GT."""
 import sys, json, time, hashlib, tempfile
 from pathlib import Path
 import numpy as np, cv2
 from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT/"tests"))
-from synthetic import textured, grade, make_ai, warp_error_px, content_mask
+from synthetic import portrait_scene, textured, grade, make_ai, warp_error_px, content_mask, make_generative, strong_grade, relight
 from retusz import imageio, grading as GR
 from retusz.engine import transfer as TR
 from quality_gate import grid, label
 
 # sharp = detail_slope (Laplacian amplitude vs GT)
-THRESH = dict(align_px=0.5, dE=2.0, sharp=0.95, halo_dE=3.0, identity_dE=0.6, removed_dE=4.0)
+THRESH = dict(align_px=0.5, dE=2.0, sharp=0.95, halo_dE=3.0, identity_dE=0.6, removed_dE=4.0, changed_gen_pct=12.0, sharp_rel=0.97, ghost_ncc=0.2, own_ncc=0.9)
 
 def hf(img, m=None):
     g = img.astype(np.float32) @ np.array([0.2126, 0.7152, 0.0722], np.float32)
@@ -42,7 +45,14 @@ def drift_true(T, P, ax=1.2, ay=1.0):
     for _ in range(12): q2 = q - np.c_[ax*np.sin(q2[:, 0]/90), ay*np.cos(q2[:, 1]/70)]
     return q2
 
-def run_case(name, o, gt, ai, true_map, outdir, kind="normal", patch=None):
+def _hp(img, s=1.5):
+    g = img.astype(np.float32) @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    return g - cv2.GaussianBlur(g, (0, 0), 4*s) if s <= 0 else cv2.GaussianBlur(g, (0, 0), s/2) - cv2.GaussianBlur(g, (0, 0), 4*s)
+
+def _corr(a, b):
+    a = a - a.mean(); b = b - b.mean(); return float((a*b).sum()/np.sqrt((a*a).sum()*(b*b).sum() + 1e-9))
+
+def run_case(name, o, gt, ai, true_map, outdir, kind="normal", patch=None, changed_ai=None, ref_out=None):
     t0 = time.perf_counter()
     prep = TR.prepare(o, ai); t1 = time.perf_counter()
     out = TR.render(prep, o, TR.TransferParams()); t2 = time.perf_counter()
@@ -72,8 +82,34 @@ def run_case(name, o, gt, ai, true_map, outdir, kind="normal", patch=None):
     else:
         if res["dE_mean"] >= THRESH["dE"]: fails.append("dE")
         if res["halo_dE"] >= THRESH["halo_dE"]: fails.append("halo")
-    if res["sharp"] < THRESH["sharp"] and kind != "info": fails.append("sharp")
-    if patch is not None:
+    if ref_out is not None:                               # generative: sharpness vs the same grade on a plain AI copy
+        res["sharp_ref"] = round(detail_slope(ref_out, gt, inside), 3); res["sharp_rel"] = round(res["sharp"]/res["sharp_ref"], 3)
+        if res["sharp_rel"] < THRESH["sharp_rel"]: fails.append("sharp")
+    elif res["sharp"] < THRESH["sharp"] and kind != "info": fails.append("sharp")
+    if changed_ai is not None:                            # generative: only the redrawn region may be flagged
+        fx, fy = _full_maps(prep.al, H, W)
+        tm = cv2.remap(changed_ai, fx, fy, cv2.INTER_LINEAR, borderValue=0) > 0.5
+        core = cv2.erode(tm.astype(np.uint8), np.ones((31, 31), np.uint8)).astype(bool) & inside
+        res["redrawn_dE"] = round(float(dm[core].mean()), 3) if core.any() else 0.0   # info: no AI data there
+        ho, hg, hn = _hp(out)[core], _hp(o)[core], _hp(naive)[core]   # ghost: the AI's redrawn detail in the result; own: the original's
+        hg0, hn0 = hg - hg.mean(), hn - hn.mean()
+        hn_new = hn0 - hg0*float((hn0*hg0).sum()/max((hg0*hg0).sum(), 1e-9))   # AI detail the original does not explain
+        X = np.stack([(cv2.GaussianBlur(c, (0, 0), 0.75) - cv2.GaussianBlur(c, (0, 0), 6))[core] for c in
+                      np.moveaxis(o.astype(np.float32), -1, 0)] + [np.ones(int(core.sum()), np.float32)], 1)
+        coef = np.linalg.lstsq(X, ho, rcond=None)[0]                  # detail of an affine colour transform of the
+        own = 1 - float(((ho - X @ coef)**2).sum()/max(((ho - ho.mean())**2).sum(), 1e-9))   # original: R^2 = 1
+        res["ghost_ncc"] = round(_corr(ho, hn_new), 3); res["own_ncc"] = round(float(np.sqrt(max(own, 0))), 3)
+        if res["changed_%"] >= THRESH["changed_gen_pct"]: fails.append("changed")
+        if res["ghost_ncc"] >= THRESH["ghost_ncc"] or res["own_ncc"] < THRESH["own_ncc"]: fails.append("ghost")
+        rest = inside & ~cv2.dilate(tm.astype(np.uint8), np.ones((61, 61), np.uint8)).astype(bool)
+        res["dE_mean"] = round(float(dm[rest].mean()), 3); res["dE_p95"] = round(float(np.percentile(dm[rest], 95)), 2)
+        if "dE" in fails: fails.remove("dE")
+        if res["dE_mean"] >= THRESH["dE"]: fails.append("dE")
+        if patch is None: ys, xs = np.nonzero(core); patch = (int(ys.mean()), int(ys.mean())+1, int(xs.mean()), int(xs.mean())+1) if core.any() else None
+        patch_metric = False
+    else:
+        patch_metric = patch is not None
+    if patch_metric:
         Y0, Y1, X0, X1 = patch; res["removed_dE"] = round(float(dm[Y0:Y1, X0:X1].mean()), 3)
         if res["removed_dE"] >= THRESH["removed_dE"]: fails.append("removed")
     if out.shape != o.shape: fails.append("size")
@@ -100,8 +136,8 @@ def _full_maps(al, H, W):
     if al.flow is not None:
         wx = wx + cv2.remap(al.flow[..., 0], wx, wy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         wy = wy + cv2.remap(al.flow[..., 1], wx, wy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-    M = al.M.astype(np.float32)
-    return M[0, 0]*wx + M[0, 1]*wy + M[0, 2], M[1, 0]*wx + M[1, 1]*wy + M[1, 2]
+    from retusz.engine.align import apply_map
+    return apply_map(al.M.astype(np.float32), wx, wy)
 
 def _pts(true_fn, prep, o):
     H, W = o.shape[:2]; ys, xs = np.meshgrid(np.linspace(80, H-80, 24), np.linspace(80, W-80, 24), indexing="ij")
@@ -110,6 +146,19 @@ def _pts(true_fn, prep, o):
     ha, wa = prep.al.ai_wh[1], prep.al.ai_wh[0]
     ok = (a[:, 0] > 3) & (a[:, 0] < wa-4) & (a[:, 1] > 3) & (a[:, 1] < ha-4)
     return a[ok], b[ok]
+
+def generative_case(tag, o, outdir):
+    rng = np.random.default_rng(5)                        # generative re-render of a grainy original
+    og = np.clip(o.astype(np.float32) + rng.normal(0, 8, o.shape), 0, 255).astype(np.uint8); lit = relight(og)
+    h, w = o.shape[:2]; f = 1.7*max(1.0, max(h, w)/2600)
+    ai, ch = make_generative(lit, (round(w/f), round(h/f)), shift=(6, -5), zoom=1.04, drift_amp=0.004,
+                             island=(0.58, 0.40, 0.14, 0.005, -0.003), regen=((0.08, 0.10, 0.33, 0.38),), fine=True)
+    gt = strong_grade(lit)
+    # reference: the same strong (non-affine: hue rotation, saturation) grade delivered as a plain downscaled copy;
+    # the generative re-render must not cost sharpness relative to it
+    plain, _ = make_ai(gt, f, 0.0, (0, 0), 0.0)
+    pr = TR.prepare(og, plain); ref = TR.render(pr, og, TR.TransferParams())
+    return run_case(f"{tag}_generatywny", og, gt, ai, None, outdir, kind="generative", changed_ai=ch, ref_out=ref)
 
 def cases_for(tag, o, mask, outdir, hard_mask=None):
     gt = grade(o, mask); res = []
@@ -126,6 +175,7 @@ def cases_for(tag, o, mask, outdir, hard_mask=None):
     res.append(run_case(f"{tag}_k3_usuniety_obiekt", o, gt0, ai, T, outdir, patch=(y0*3+15, y1*3-15, x0*3+15, x1*3-15)))
     ai = cv2.resize(o, (o.shape[1]//3, o.shape[0]//3), interpolation=cv2.INTER_AREA)
     res.append(run_case(f"{tag}_tozsamosc", o, o, ai, None, outdir, kind="identity"))
+    res.append(generative_case(tag, o, outdir))
     if hard_mask is not None:                             # stress: mask edge cutting through smooth areas
         gth = grade(o, hard_mask); ai, T = make_ai(gth, 3, -1.0, (-3.2, 2.5), 0.06)
         res.append(run_case(f"{tag}_k3_twarda_maska", o, gth, ai, T, outdir, kind="info"))
@@ -144,6 +194,8 @@ def main(argv):
     outdir = Path(argv[0]); outdir.mkdir(parents=True, exist_ok=True); results = []
     print("syntetyczne 4500x3000:")
     o, disc = textured(3000, 4500, seed=101); results += cases_for("synt", o, disc, outdir)
+    print("syntetyczny portret 2000x3000:")
+    o, _ = portrait_scene(3000, 2000, seed=3); results.append(generative_case("portret", o, outdir))
     for p in map(Path, argv[1:]):
         o, _ = imageio.load(p); print(f"{p.name} {o.shape[1]}x{o.shape[0]}:")
         results += cases_for(p.stem, o, content_mask(o), outdir, content_mask(o, hard=True))
