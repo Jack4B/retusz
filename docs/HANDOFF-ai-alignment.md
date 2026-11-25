@@ -21,7 +21,7 @@ v0.1.4: original `mateusz_1.jpg` (2938×4401) + AI `book_1.jpg` (1686×2528, Gem
   redrawn patch). Helpers added to `tests/synthetic.py`: `smooth_field`, `strong_grade`, `make_generative`.
 - `.gitignore`: `private-tests/`, `.private/`.
 
-## Root cause 2 (OPEN, the next thing to do): change map flags ~80% of a real regenerated image
+## Root cause 2 (FIXED in 0.1.5): change map flagged ~80% of a real regenerated image
 End-to-end on the real pair after fix 1: align OK (residual 1.47 px full-res, flow kept, coverage 99%), but
 `prepare().changed_frac` = **79%**. The result sheet `/workspace/private-tests/sheet_mateusz1_result.jpg`
 (orig | AI | result | change map) shows the result ≈ original (almost nothing transferred), because the protected fit
@@ -37,6 +37,17 @@ gives changed pixels weight 0.
   Target: changed_frac on this pair ≈ 3–10 %, localised on poster/hands/edges, not everywhere.
 - Then visually check at 100% for ghosting/double edges and halos around people (user complaint in t61u:
   "poświata dookoła ludzi i płaski obraz" was about dodge&burn, a separate task).
+
+### Fix (0.1.5)
+`transfer.changed_map` now compares structure in DoG bands (2, 5, 12 work px; the finest starts at a 1 px blur),
+counts a band only where either side is above NOISE_K=3 x its own noise level (Immerkaer 1996 noise estimate per
+image: the grainy original vs the smooth AI copy) and keeps only compact regions (area opening >= (0.016*long side)^2,
+closing, holes filled). Synthetic reproduction (`synthetic.portrait_scene` grain 8 + `make_generative(fine=True)` +
+`relight`, redrawn poster = 7 %): old map 77.6 %, new 7.2 %, recall on the poster 97 %; tests in
+`tests/test_transfer.py` (generative fixture). Registration also tries ECC MOTION_HOMOGRAPHY from the affine fit and
+keeps it only when it clearly fits better (`Alignment.projective`). Gate: `--transfer` has `*_generatywny` cases
+(changed < 12 %, sharpness >= 0.97 x the same grade on a plain AI copy, ghost NCC < 0.2, own-detail R >= 0.9).
+Not yet checked on the real pair (no access to private photos from the cloud box): run the commands below on the PC.
 
 ## Residual numbers (real pair, full-res px)
 rigid 2.2 → with DIS flow 1.47 (tile phase-correlation metric). Edge overlays show the AI redraws glasses/edges with
@@ -55,9 +66,9 @@ python -m retusz transfer /workspace/private-tests/mateusz_1.jpg /workspace/priv
 Real-pair sheet script: see `/tmp/e2e.py` pattern: `TR.prepare` → `TR.render` → hstack(orig, AI, result, change map).
 
 ## Still to do for v0.1.5
-1. Fix root cause 2 (above), rerun the gate (align<0.5 on synthetic, ΔE2000<2, sharp≥0.95 except known noisy NEF, identity 0).
+1. ~~Fix root cause 2 (above), rerun the gate~~ done: synthetic gate PASS (see docs/plans/grading-transfer.md).
 2. Visual check of the real pair at 100% (`crop100_result.png` pattern); also pairs 10–15 from `private_pairs`.
-3. Bump version to 0.1.5 (`retusz/__init__.py`, `pyproject.toml`), push branch, CI green, tag from the pushed commit
+3. ~~Bump version to 0.1.5~~ done; (`retusz/__init__.py`, `pyproject.toml`), push branch, CI green, tag from the pushed commit
    (push directly; no GitHub web merge, it leaks the account email), release asset via CI.
 4. PC: `git pull`, `PyInstaller retusz.spec`, run transfer on `D:\AplikacjaRetusz\private_pairs\mateusz_1.jpg` +
    `book_1.jpg` writing only to a `Retusz\` subfolder.

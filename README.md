@@ -1,4 +1,4 @@
-# Retusz 0.1.3
+# Retusz 0.1.5
 
 Aplikacja na Windows: przenosi wygląd Twojego wzorca (np. zdjęcia obrobionego w Photoshopie) na całą serię zdjęć,
 dodaje **Plastykę 3D** (światło kierunkowe z mapy głębi) i subtelny **dodge & burn**. Autor: Jack4B.
@@ -6,6 +6,16 @@ dodaje **Plastykę 3D** (światło kierunkowe z mapy głębi) i subtelny **dodge
 ## Kontrola jakości
 
 `tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--pair-export EKSPORT WZORZEC` ocenia gotowy eksport.
+
+### 0.1.5
+- **Przenieś grading z AI** działa z prawdziwymi wersjami z generatywnego AI (Gemini / Nano Banana), które mają inny
+  kadr i skalę, lekko przesuwają postać i przerysowują drobne szczegóły:
+  - dopasowanie szuka wspólnych punktów w strukturze zdjęcia, a nie w ziarnie (wcześniej: „Wersja AI nie pasuje do
+    oryginału”); przy lekkiej zmianie perspektywy samo przechodzi na homografię, drobne niesztywne przesunięcia
+    poprawia przepływ optyczny;
+  - **mapa zmian** oznacza tylko miejsca naprawdę przerysowane przez AI (np. plakat, dłonie), a nie całe zdjęcie
+    z wygładzonym ziarnem – światło i kolor przenoszą się na cały kadr; w przerysowanych miejscach zostaje
+    szczegół oryginału (bez duchów i podwójnych krawędzi).
 
 ### 0.1.3
 - **Histogram** wyniku (R, G, B, jasność, w obszarze kadru) z ostrzeżeniem o przepaleniach: trójkąty świecą, gdy coś jest

@@ -127,3 +127,17 @@ of the original) but its finest-scale gain is ~6% below the ground truth's point
 fits the same model to the *full-resolution* GT reaches only 0.937 (prefilter 9 px) – 0.978 (no prefilter),
 so the gap is information the low-resolution AI copy does not carry. Tried without effect: prefilter 2–5,
 lam 1e-6, 20 bins, σ_z 0.4, σ_xy 0.5, low-resolution GT mask, blurred bin selection, band-limited detail gain.
+
+## Gate results 0.1.5 (cloud box, synthetic only, 2026-11-25)
+`python tools/quality_gate.py --transfer OUT` → PASS. Generative cases (grainy original, re-rendered AI copy with redrawn
+fine detail, local relight, strong hue/saturation regrade, drift, one redrawn region):
+
+| case | changed % (true ~7) | ΔE mean outside redrawn | sharp rel. to plain copy | ghost NCC | own-detail R | halo ΔE |
+|---|---|---|---|---|---|---|
+| synthetic 4500×3000 | 9.99 | 1.55 | 0.981 | 0.004 | 0.997 | 1.85 |
+| synthetic portrait 2000×3000 | 7.22 | 1.64 | 0.975 | 0.013 | 0.994 | 2.55 |
+
+Before the fix the portrait case flagged 77.6 %. In a redrawn region the AI carries no information about that
+content's grade, so it gets the neighbours' transform (redrawn_dE 7.1 on a saturated poster next to a grey wall:
+reported, not gated). Absolute sharpness vs the strong non-affine GT is 0.86–0.88 for both the generative and a plain
+AI copy: a limit of the local affine colour model, not of the generative input.
