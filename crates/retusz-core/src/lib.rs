@@ -1,10 +1,11 @@
 //! Retusz Core Engine (Rust): photographic tone & colour science (OKLab, Bradford CAT,
-//! 3D LUT tetrahedral interpolation, CIEDE2000, RGB Guided Filter), Dodge & Burn v2,
-//! Plastyka 3D, Bilateral Guided Upsampling, Presets, and non-destructive sidecars.
+//! 3D LUT tetrahedral interpolation, CIEDE2000, RGB Guided Filter, ColorChecker Root-Polynomial
+//! calibration), Dodge & Burn v2, Plastyka 3D, Bilateral Guided Upsampling, Presets, and sidecars.
 //! Author: Jack4B.
 
 pub mod bgu;
 pub mod color;
+pub mod colorchecker;
 pub mod dnb;
 pub mod geometry;
 pub mod histo;
@@ -191,5 +192,37 @@ mod tests {
         assert_eq!(applied.angle, 3.5);
         assert_eq!(applied.crop, Some([0.1, 0.1, 0.9, 0.9]));
         assert!((applied.exposure - builtins[1].params.exposure).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_colorchecker_root_polynomial_calibration_and_skin_oklch() {
+        let mut meas = [[0.0f32; 3]; 24];
+        for (i, rgb) in colorchecker::CC24_SRGB.iter().enumerate() {
+            let [rl, gl, bl] = color::srgb_to_lin([
+                rgb[0] as f32 / 255.0,
+                rgb[1] as f32 / 255.0,
+                rgb[2] as f32 / 255.0,
+            ]);
+            // Apply strong tungsten + exposure cast in linear light
+            let r_cast = (rl * 0.88 + gl * 0.04).clamp(0.0, 1.0);
+            let g_cast = (gl * 0.66).clamp(0.0, 1.0);
+            let b_cast = (bl * 0.45).clamp(0.0, 1.0);
+            let s = color::lin_to_srgb([r_cast, g_cast, b_cast]);
+            meas[i] = [s[0] * 255.0, s[1] * 255.0, s[2] * 255.0];
+        }
+        let cal = colorchecker::calibrate_from_patches(&meas, None, [[0.0, 0.0]; 24], 20.0);
+        assert!(cal.report.de00_before > 10.0, "before = {}", cal.report.de00_before);
+        assert!(cal.report.de00_after < 0.8, "after = {}", cal.report.de00_after);
+        assert!(cal.report.skin_de00 < 0.6, "skin = {}", cal.report.skin_de00);
+        assert!(cal.report.gray_de00 < 0.5, "gray = {}", cal.report.gray_de00);
+
+        let sk = color::srgb_to_lin([0.72, 0.62, 0.42]);
+        let ok0 = tone::lin_to_oklab(sk);
+        let h0 = ok0[2].atan2(ok0[1]).to_degrees();
+        let sk_fixed = tone::apply_skin_oklch(sk, 0.85, 0.0);
+        let ok1 = tone::lin_to_oklab(sk_fixed);
+        let h1 = ok1[2].atan2(ok1[1]).to_degrees();
+        assert!((h1 - 50.0).abs() < (h0 - 50.0).abs() * 0.35);
+        assert!((ok1[0] - ok0[0]).abs() < 1e-4);
     }
 }

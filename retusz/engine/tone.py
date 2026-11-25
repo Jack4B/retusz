@@ -170,6 +170,32 @@ def apply_color_oklab(lin, saturation: float = 0.0, vibrance: float = 0.0, is_sk
     return oklab_to_lin_gamut(ok_out)
 
 
+def apply_skin_oklch(lin, skin_cast: float = 0.0, skin_hue: float = 0.0):
+    """OKLCh skin-locus cast reduction and skin hue control (applied to the skin 3D LUT so lightness L
+    and fine pore detail remain 100 % intact):
+    - skin_cast (0..1): pulls anomalous green/magenta/yellow colour casts on skin towards the natural
+      portrait complexion locus in OKLCh (~50 deg) and gently tames excessive redness spikes.
+    - skin_hue (-1..1): rotates skin hue angle (- = cooler/rosier, + = warmer/golden)."""
+    if not (skin_cast or skin_hue):
+        return np.asarray(lin, np.float32)
+    ok = lin_to_oklab(np.clip(lin, 0.0, 1.0))
+    L, a, b = ok[..., 0], ok[..., 1], ok[..., 2]
+    C = np.hypot(a, b)
+    h = np.arctan2(b, a)
+    h_target = np.float32(np.radians(50.0))
+    dh = np.arctan2(np.sin(h - h_target), np.cos(h - h_target))
+    w_locus = np.exp(-((dh / 1.15) ** 4)) * np.clip(C / 0.015, 0.0, 1.0)
+    h_new = h - np.float32(skin_cast) * 0.88 * w_locus * dh + np.float32(skin_hue) * 0.16 * w_locus
+    c_excess = np.maximum(C - 0.11, 0.0)
+    C_new = C - np.float32(max(0.0, skin_cast)) * 0.35 * w_locus * c_excess
+    ok_out = np.empty_like(ok)
+    ok_out[..., 0] = L
+    ok_out[..., 1] = C_new * np.cos(h_new)
+    ok_out[..., 2] = C_new * np.sin(h_new)
+    return oklab_to_lin_gamut(ok_out)
+
+
+
 CLARITY_SIDE = 256   # fixed analysis scale so preview and full-res export produce identical clarity gain
 
 

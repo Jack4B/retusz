@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field, asdict, fields
 import numpy as np, cv2
 from . import color as C, faces as F, render as R, modflows as MF, relight as RL, dnb as DNB
-from . import wb as WB, geometry as GEO, tone as TN
+from . import wb as WB, geometry as GEO, tone as TN, colorchecker as CC
 
 GRID = 33
 ANALYSIS_SIDE = 1200   # masks, zones, vignette, skin statistics
@@ -18,8 +18,8 @@ FIT_SIDE = 800         # AI encoder / IDT input
 
 @dataclass
 class Params:
-    """User controls. Ranges: strength/skin/vignette/db/plastic/skin_even/wide 0..1,
-    exposure -2..2 EV, contrast/shadows/highlights/whites/blacks/saturation/vibrance/clarity/temp/tint -1..1."""
+    """User controls. Ranges: strength/skin/vignette/db/plastic/skin_even/skin_cast/wide 0..1,
+    exposure -2..2 EV, contrast/shadows/highlights/whites/blacks/saturation/vibrance/clarity/skin_hue/temp/tint -1..1."""
     strength: float = 1.0
     skin: float = 1.0
     exposure: float = 0.0           # 'Ekspozycja' -2..2 EV (linear light + filmic shoulder)
@@ -36,6 +36,8 @@ class Params:
     saturation: float = 0.0         # 'Nasycenie' -1..1
     vibrance: float = 0.0           # 'Jaskrawość' -1..1 (OKLab, boosts dull colours, spares skin)
     skin_even: float = 0.3          # 'Równanie skóry' 0..1 (local colour casts on skin, mixed light)
+    skin_cast: float = 0.0          # 'Czysta skóra' 0..1 (OKLCh skin-locus cast reduction)
+    skin_hue: float = 0.0           # 'Odcień skóry' -1..1 (OKLCh skin hue angle rotation)
     wide: float = 0.0               # 'Pełne barwy' 0..1: colours as sRGB numbers look on a wide-gamut (AdobeRGB) monitor
     temp: float = 0.0               # 'Temperatura' -1..1 (white balance, Bradford CAT)
     tint: float = 0.0               # 'Odcień' -1..1 (+ = magenta)
@@ -53,9 +55,9 @@ class Params:
         p = cls(**{k: v for k, v in (d or {}).items() if k in names})
         if p.light_angle is not None: p.light_angle = float(p.light_angle) % 360
         p.exposure = float(np.clip(p.exposure, -2.0, 2.0))
-        for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even", "wide"):
+        for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even", "skin_cast", "wide"):
             setattr(p, k, float(np.clip(getattr(p, k), 0, 1)))
-        for k in ("contrast", "shadows", "highlights", "whites", "blacks", "clarity", "saturation", "vibrance", "temp", "tint"):
+        for k in ("contrast", "shadows", "highlights", "whites", "blacks", "clarity", "saturation", "vibrance", "skin_hue", "temp", "tint"):
             setattr(p, k, float(np.clip(getattr(p, k), -1, 1)))
         p.strokes = list(p.strokes or [])
         p.angle = float(np.clip(p.angle or 0.0, -45, 45))
@@ -66,7 +68,7 @@ class Params:
     def colour_key(self):
         return tuple(round(getattr(self, k), 3) for k in (
             "strength", "exposure", "contrast", "shadows", "highlights", "whites", "blacks",
-            "saturation", "vibrance", "wide", "temp", "tint"))
+            "saturation", "vibrance", "skin_cast", "skin_hue", "wide", "temp", "tint"))
 
 @dataclass
 class RefAnalysis:
@@ -78,6 +80,7 @@ class RefAnalysis:
     vig_profile: np.ndarray
     embeddings: dict = field(default_factory=dict)  # model path -> embedding
     light_angle: float | None = None                 # estimated key-light direction of the reference
+    cc_cal: object = None    # CC.ChartCalibration if calibrated via ColorChecker
 
 @dataclass
 class Fit:
@@ -94,6 +97,8 @@ class Fit:
     guard_skin: tuple = None   # closed-loop skin a/b correction (A, b)
     hue_k: object = None       # background per-hue chroma ratios (HUE_SECTORS)
     lms_n: list = None         # YuNet landmarks per face (5x2) normalised to image width; None = from the box
+    cc_report: object = None   # CC.ChartReport if calibrated via ColorChecker
+    cc_lut_srgb: np.ndarray | None = None  # 33^3x3 sRGB 0..1 LUT from ColorChecker calibration
 
 MASK_SIDE = 400   # skin mask working size (long side) for every resolution
 
@@ -236,22 +241,56 @@ class Engine:
         return MF.device_name(self.model) if self.model else "CPU"
 
     # ---------- stage 1 ----------
-    def analyse_reference(self, ref_rgb) -> RefAnalysis:
+    def analyse_reference(self, ref_rgb, colorchecker: bool = False) -> RefAnalysis:
         ref_rgb = C.crop_border(ref_rgb)
         r = C.small(ref_rgb, ANALYSIS_SIDE); fr = F.pick_faces(r); mr = F.skin_mask(r, fr)
         Rl = C.to_lab(r)
         bg = 1-cv2.dilate(mr, np.ones((15, 15)))
         ra = RefAnalysis(r, C.small(ref_rgb, FIT_SIDE), fr, mr, Rl, C.vignette_profile(Rl[..., 0], bg))
         ra.light_angle = RL.Relight(r, mr, [np.asarray(f, np.float32)/r.shape[1] for f in fr], self.depth_ai).auto_angle
+        if colorchecker:
+            ra.cc_cal = CC.calibrate_chart(ref_rgb)
         return ra
 
+    def prepare(self, src_rgb, reference=None, colorchecker: bool = False) -> Fit:
+        """Convenience stage-1 + stage-2 entry point: accepts None, a raw RGB reference array, or a RefAnalysis."""
+        if isinstance(reference, np.ndarray):
+            ref = self.analyse_reference(reference, colorchecker=colorchecker)
+        else:
+            ref = reference
+            if colorchecker and ref is not None and getattr(ref, "cc_cal", None) is None:
+                ref.cc_cal = CC.calibrate_chart(ref.rgb)
+        return self.fit(src_rgb, ref, colorchecker=colorchecker)
+
     # ---------- stage 2 ----------
-    def fit(self, src_rgb, ref: RefAnalysis | None = None) -> Fit:
+    def fit(self, src_rgb, ref: RefAnalysis | None = None, colorchecker: bool = False) -> Fit:
         T = {}; t = time.perf_counter()
         s = C.small(src_rgb, ANALYSIS_SIDE); fs, lms = F.pick_faces(s, landmarks=True); ms = F.skin_mask(s, fs)
         S = C.to_lab(s); T["analyse_s"] = time.perf_counter()-t; t = time.perf_counter()
         G, Glab = C.grid_lab(GRID)
         W = s.shape[1]
+
+        # ColorChecker calibration mode (from reference chart or chart directly inside src_rgb)
+        cc_cal = getattr(ref, "cc_cal", None) if ref is not None else None
+        if colorchecker and cc_cal is None:
+            cc_cal = CC.calibrate_chart(ref.rgb if ref is not None else src_rgb)
+        if cc_cal is not None:
+            d = [np.zeros(2, np.float32) for _ in range(3)]
+            vig_diff = np.linspace(0.0, -10.0, 32, dtype=np.float32)
+            fit = Fit(cc_cal.lut_lab, cc_cal.lut_lab, d, [np.asarray(f, np.float32)/W for f in fs],
+                      vig_diff, (0.0, 0.0, 0.0), "colorchecker", T)
+            fit.cc_report = cc_cal.report
+            fit.cc_lut_srgb = cc_cal.lut_srgb
+            fit.lms_n = [np.asarray(l, np.float32)/W for l in lms] if len(lms) == len(fs) else None
+            t3 = time.perf_counter()
+            fit.relight = RL.Relight(s, ms, fit.faces_n, self.depth_ai)
+            if ref is not None and ref.light_angle is not None:
+                fit.relight.auto_angle = ref.light_angle
+            T["depth_s"] = time.perf_counter()-t3
+            fit._lut_cache = {}
+            T["prepare_s"] = time.perf_counter()-t
+            return fit
+
         if ref is None:
             glob = Glab.astype(np.float32)
             d = [np.zeros(2, np.float32) for _ in range(3)]
@@ -320,9 +359,13 @@ class Engine:
 
     # ---------- stage 3 ----------
     @staticmethod
-    def _bake_one(lab_in, d_zone, zone_amt, skin_protect, p: Params, offset, chroma_lim=1.2, is_skin=False, guard=None, hue_k=None, standalone=False):
+    def _bake_one(lab_in, d_zone, zone_amt, skin_protect, p: Params, offset, chroma_lim=1.2, is_skin=False,
+                  guard=None, hue_k=None, standalone=False, cc_lut_srgb=None):
         N = lab_in.shape[0]
-        if standalone:
+        if cc_lut_srgb is not None:
+            G = C.rgb_grid(N)
+            rgb = np.clip(G + p.strength * (cc_lut_srgb - G), 0.0, 1.0).astype(np.float32)
+        elif standalone:
             rgb = C.rgb_grid(N).copy()
         else:
             _, S = C.grid_lab(N)
@@ -339,12 +382,15 @@ class Engine:
             rgb = cv2.cvtColor(O.reshape(-1, 1, 3).astype(np.float32), cv2.COLOR_LAB2RGB).reshape(N, N, N, 3)
             rgb = np.clip(rgb, 0, 1)
         # Photographic tone & colour edits in linear light + OKLab (work even when strength == 0)
-        has_tone = any((p.exposure, p.contrast, p.highlights, p.shadows, p.whites, p.blacks, p.saturation, p.vibrance))
+        has_tone = any((p.exposure, p.contrast, p.highlights, p.shadows, p.whites, p.blacks,
+                        p.saturation, p.vibrance, is_skin and (p.skin_cast or p.skin_hue)))
         if has_tone:
             lin = TN.srgb_to_lin(rgb)
             if p.exposure: lin = TN.apply_exposure_lin(lin, p.exposure)
             if p.contrast or p.highlights or p.shadows or p.whites or p.blacks:
                 lin = TN.apply_tone_lin(lin, p.contrast, p.highlights, p.shadows, p.whites, p.blacks)
+            if is_skin and (p.skin_cast or p.skin_hue):
+                lin = TN.apply_skin_oklch(lin, p.skin_cast, p.skin_hue)
             if p.saturation or p.vibrance:
                 lin = TN.apply_color_oklab(lin, p.saturation, p.vibrance, is_skin=is_skin)
             rgb = TN.lin_to_srgb(lin)
@@ -355,17 +401,18 @@ class Engine:
     def bake(self, fit: Fit, p: Params):
         cache = getattr(fit, "_lut_cache", None)
         sa = fit.method == "standalone"
-        key = (p.colour_key(), sa)
+        cc_lut = getattr(fit, "cc_lut_srgb", None)
+        key = (p.colour_key(), fit.method)
         if cache is not None and key in cache: return cache[key]
         o = fit.offset
-        luts = (self._bake_one(fit.glob, fit.d_zone, 1.0, 0, p, o, guard=fit.guard_bg, hue_k=fit.hue_k, standalone=sa),
-                self._bake_one(fit.skin, fit.d_zone, 0.3, 0.25, p, (o[0], o[1]*0.5, o[2]*0.5), is_skin=True, guard=fit.guard_skin, standalone=sa))
+        luts = (self._bake_one(fit.glob, fit.d_zone, 1.0, 0, p, o, guard=fit.guard_bg, hue_k=fit.hue_k, standalone=sa, cc_lut_srgb=cc_lut),
+                self._bake_one(fit.skin, fit.d_zone, 0.3, 0.25, p, (o[0], o[1]*0.5, o[2]*0.5), is_skin=True, guard=fit.guard_skin, standalone=sa, cc_lut_srgb=cc_lut))
         if cache is not None:
             if len(cache) > 16: cache.clear()
             cache[key] = luts
         return luts
 
-    def render(self, src, fit: Fit, p: Params, db_enabled=True, return_mask=False, timings=None):
+    def render(self, src, fit: Fit, p: Params, db_enabled=True, return_mask=False, timings=None, preview=False):
         """Apply a fit to src at its own resolution (preview or full-size)."""
         T = timings if timings is not None else {}
         t = time.perf_counter()
@@ -374,7 +421,8 @@ class Engine:
         q = cv2.resize(src, (qw, qh), interpolation=cv2.INTER_AREA)
         subj = fit.relight.fg if (fit.relight is not None and getattr(fit.relight, "fg", None) is not None) else None
         mq_raw = skin_mask_fixed(src, fit.faces_n, qh, qw, subject=subj)
-        mq = mq_raw*p.skin
+        skin_w = max(p.skin, 1.0 if (p.skin_cast > 0 or abs(p.skin_hue) > 1e-4) else 0.0)
+        mq = mq_raw*skin_w
         gain = np.zeros((qh, qw, 3), np.float32)
         need_vig = p.vignette > 0 and np.any(fit.vig_diff < 0)
         need_3d = p.plastic > 0 and fit.relight is not None

@@ -1,13 +1,26 @@
-# Retusz 0.2.0
+# Retusz 0.3.0
 
 Aplikacja na Windows: pełnoprawny edytor portretowy z obróbką tonalną i barwną w przestrzeni OKLab (Ekspozycja EV, Kontrast,
-Światła/Cienie, Biele/Czernie, Balans bieli Bradford CAT, Przejrzystość), **Plastyką 3D** (światło kierunkowe z mapy głębi),
-subtelnym **dodge & burn**, biblioteką **Presetów**, przenoszeniem gradingu z AI oraz opcjonalnym dopasowaniem kolorów do
-wzorca. Autor: Jack4B.
+Światła/Cienie, Biele/Czernie, Balans bieli Bradford CAT, Przejrzystość), kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**,
+kontrolą zafarbów i odcienia skóry w **OKLCh**, **Plastyką 3D** (światło kierunkowe z mapy głębi), subtelnym **dodge & burn**,
+biblioteką **Presetów**, przenoszeniem gradingu z AI oraz opcjonalnym dopasowaniem kolorów do wzorca. Autor: Jack4B.
 
 ## Kontrola jakości
 
-`tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--pair-export EKSPORT WZORZEC` ocenia gotowy eksport.
+`tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--colorchecker` sprawdza detekcję i kalibrację 24 pól ColorChecker (średnie ΔE₀₀ < 1,2, skóra < 1,0, szarości < 0,8).
+
+### 0.3.0
+- **Kalibracja ColorChecker Classic (24 pola + raport ΔE₀₀)** (`retusz/engine/colorchecker.py`, `crates/retusz-core/src/colorchecker.rs`):
+  - **automatyczna detekcja tablicy 6×4** odporna na skalę, położenie i pełny obrót 0–360° (automatyczna orientacja po 6 polach neutralnych `#19 Biały` → `#24 Czarny`);
+  - **kalibracja Root-Polynomial Color Correction (Finlayson, Mackiewicz & Hurlbert 2015)** w świetle liniowym z priorytetową wagą dla pól skóry (`#1 Ciemna skóra`, `#2 Jasna skóra`) i skali neutralnej (`#19–#24`), wypalana do tetraedrycznego LUT 33³ z ochroną gamutu OKLab;
+  - **tryb „Dopasuj serię do ColorChecker”** w zakładce `▸ Wzorzec (AI)` (przyciski **Z pliku…** oraz **Z kadru**) i w CLI (`python -m retusz cli FOLDER --colorchecker tablica.jpg`);
+  - **raport ΔE₀₀ (przed → po)** i wizualna nakładka diagnostyczna 24 pól (lewa połowa pola = cel D65, prawa = kolor po kalibracji);
+  - nowa bramka jakości `python tools/quality_gate.py --colorchecker OUTDIR [zdjęcia...]`.
+- **Kontrola zafarbów i odcienia skóry w OKLCh** (`skin_cast`, `skin_hue`):
+  - **Czysta skóra (0–100%)**: automatyczna redukcja obcych zafarbów na skórze (zielony refleks od liści/trawy, magentowy LED, siny cień) ku naturalnemu pasmu karnacji w przestrzeni biegunowej OKLCh przy 100% zachowaniu jasności $L$ i tekstury porów;
+  - **Odcień skóry (−100…+100)**: płynna regulacja kąta odcienia skóry (chłodniejszy/różowy ↔ cieplejszy/złoty) wyłącznie wewnątrz adaptacyjnej maski skóry.
+- **Workflow serii (`→seria` i `--preset`)**:
+  - przycisk **`→seria`** w sekcji `Presety` oraz flaga CLI `--preset "Nazwa"` nakładają wybrany styl na całą serię z zachowaniem indywidualnego kadru i prostowania każdego zdjęcia.
 
 ### 0.2.0
 - **Pełnoprawny edytor studyjny (samodzielna praca bez wzorca + dopasowanie do wzorca jako otwierana sekcja dodatkowa)**:

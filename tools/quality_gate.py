@@ -135,6 +135,9 @@ def main():
     if args and args[0] == "--dnb":                         # D&B / Plastyka 3D gate (tools/dnb_gate.py)
         sys.path.insert(0, str(Path(__file__).resolve().parent)); import dnb_gate
         sys.exit(dnb_gate.main(args[1:]))
+    if args and args[0] == "--colorchecker":                # ColorChecker 24-patch calibration gate (tools/colorchecker_gate.py)
+        sys.path.insert(0, str(Path(__file__).resolve().parent)); import colorchecker_gate
+        sys.exit(colorchecker_gate.main(args[1:]))
     out = Path(args.pop(0)); out.mkdir(parents=True, exist_ok=True)
     if args and args[0] == "--pair-export":
         e, r = [np.asarray(Image.open(p).convert("RGB")) for p in args[1:3]]

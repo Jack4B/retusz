@@ -62,9 +62,11 @@ def script():
     app.slider_tabs.set("▸ Wzorzec (AI)"); app._slider_tab("▸ Wzorzec (AI)"); pump(4)
     grab("10c_wzorzec_bonus.png")
     if geom() != g0: print("LAYOUT CHANGED by reference bonus tab"); ok = False
-    # Test Preset application + undo
+    # Test Preset application + preset_to_series + undo
     app.apply_preset_by_name("Ciepły złoty"); pump(3)
     if abs(app.params.exposure - 0.15) > 1e-4: print("PRESET APPLY FAILED"); ok = False
+    app.preset_to_series(); pump(3)
+    if abs(app.series.params.exposure - 0.15) > 1e-4: print("PRESET TO SERIES FAILED"); ok = False
     app.undo(); pump(3)
     if geom() != g0: print("LAYOUT CHANGED by preset"); ok = False
     app.slider_tabs.set("Portret i Plastyka"); app._slider_tab("Portret i Plastyka"); pump(3)
@@ -72,9 +74,9 @@ def script():
     for a in range(0, 360, 15):
         app.light.set(a); app._light(a); pump(2)
         if geom() != g0: print("LAYOUT CHANGED at", a, geom(), g0); ok = False; break
-    for k in ("skin_even", "clarity"):
+    for k in ("skin_even", "skin_cast", "skin_hue", "clarity"):
         s = app.sliders[k][0]
-        for v in (0, 100, 0) if k == "skin_even" else (-100, 100, 0): s.set(v); app._slider(k, v); pump(2)
+        for v in (0, 100, 0) if k in ("skin_even", "skin_cast") else (-100, 100, 0): s.set(v); app._slider(k, v); pump(2)
         if geom() != g0: print("LAYOUT CHANGED by", k); ok = False
     app.slider_tabs.set("Światło i Kolor"); app._slider_tab("Światło i Kolor"); pump(3)
     print("layout stable:", ok, flush=True)
