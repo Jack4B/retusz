@@ -90,19 +90,33 @@ class Alignment:
         valid = cv2.erode(valid, np.ones((3, 3), np.uint8))
         return out, valid
 
-def _sift_affine(a8, b8):
-    sift = cv2.SIFT_create(nfeatures=5000)
-    ka, da = sift.detectAndCompute(a8, None); kb, db = sift.detectAndCompute(b8, None)
+def _clahe8(g):
+    return cv2.createCLAHE(3.0, (8, 8)).apply(np.clip(g*255, 0, 255).astype(np.uint8))
+
+def _match_set(fa, fb, ratio=0.8, nf=8000):
+    sift = cv2.SIFT_create(nfeatures=nf)
+    ka, da = sift.detectAndCompute(fa, None); kb, db = sift.detectAndCompute(fb, None)
     if da is None or db is None or len(ka) < 8 or len(kb) < 8:
-        raise AlignmentError("Za mało szczegółów do dopasowania wersji AI do oryginału.")
+        return np.zeros((0, 2), np.float32), np.zeros((0, 2), np.float32)
     m = cv2.BFMatcher(cv2.NORM_L2).knnMatch(da, db, k=2)
-    good = [p[0] for p in m if len(p) == 2 and p[0].distance < 0.75*p[1].distance]
-    if len(good) < 12:
+    good = [p[0] for p in m if len(p) == 2 and p[0].distance < ratio*p[1].distance]
+    return (np.float32([ka[g.queryIdx].pt for g in good]).reshape(-1, 2),
+            np.float32([kb[g.trainIdx].pt for g in good]).reshape(-1, 2))
+
+def _sift_affine(ga, gb):
+    """ga, gb: float luminance. Matching runs on CLAHE luminance and on coarse local-contrast-normalised
+    luminance and pools both: fine-scale LCN (the first version) amplifies the original's grain, which a
+    regenerated AI image does not have, and left only ~20 inliers on real portraits (flaky RANSAC)."""
+    sets = [(_clahe8(ga), _clahe8(gb)), (to8(lcn(ga, 6)), to8(lcn(gb, 6)))]
+    P = [_match_set(*s_) for s_ in sets]
+    pa = np.vstack([p[0] for p in P]); pb = np.vstack([p[1] for p in P])
+    if len(pa) < 12:
         raise AlignmentError("Wersja AI nie pasuje do oryginału (za mało wspólnych punktów).")
-    pa = np.float32([ka[g.queryIdx].pt for g in good]); pb = np.float32([kb[g.trainIdx].pt for g in good])
-    M, inl = cv2.estimateAffine2D(pa, pb, method=cv2.RANSAC, ransacReprojThreshold=2.5, maxIters=8000, confidence=0.999)
+    th = float(np.clip(0.0025*max(gb.shape), 3.0, 8.0))   # generative tools drift a little: not 2.5 px
+    cv2.setRNGSeed(12345)
+    M, inl = cv2.estimateAffine2D(pa, pb, method=cv2.RANSAC, ransacReprojThreshold=th, maxIters=10000, confidence=0.9999)
     n = int(inl.sum()) if inl is not None else 0
-    if M is None or n < 20 or n < 0.15*len(good):
+    if M is None or n < 12 or n < 0.08*len(pa):
         raise AlignmentError("Wersja AI nie pasuje do oryginału (dopasowanie niespójne).")
     sv = np.linalg.svd(M[:, :2], compute_uv=False)
     if sv[1] <= 0 or sv[0]/sv[1] > 1.3:
@@ -147,7 +161,7 @@ def register(orig, ai, flow=False, orig_small=None) -> Alignment:
     w0, h0 = max(1, round(W*s0)), max(1, round(H*s0))
     o0 = resize_to(orig, (w0, h0)) if orig_small is None else orig_small
     ga, gb = gray(o0), gray(ai)
-    M0, n = _sift_affine(to8(lcn(ga, 3)), to8(lcn(gb, 3)))
+    M0, n = _sift_affine(ga, gb)
     sig = np.sqrt(abs(np.linalg.det(M0[:, :2])))
     s = min(1.0, s0*sig)
     ww, hw = max(16, round(W*s)), max(16, round(H*s))

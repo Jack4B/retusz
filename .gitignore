@@ -11,3 +11,5 @@ retusz-seria.json
 /models/
 *.log
 .coverage
+private-tests/
+.private/

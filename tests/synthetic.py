@@ -83,3 +83,50 @@ def warp_error_px(T_true, T_est, full_shape, ai_shape, flow_fn=None, n=24):
     inside = (a[0] > 2) & (a[0] < wa-3) & (a[1] > 2) & (a[1] < ha-3)
     s = np.sqrt(abs(np.linalg.det(T_true[:, :2])))
     return float(np.linalg.norm((a-b)[:, inside], axis=0).mean()/s)
+
+
+def smooth_field(h, w, amp, sigma, seed):
+    """Smooth random 2-channel displacement field (px), peak amplitude ~amp."""
+    r = np.random.default_rng(seed)
+    f = np.stack([cv2.GaussianBlur(r.standard_normal((h, w)).astype(np.float32), (0, 0), sigma) for _ in range(2)], -1)
+    return (f/(np.abs(f).max() + 1e-9)*amp).astype(np.float32)
+
+def strong_grade(rgb, hue_deg=14.0, cool=0.10, gain=1.25, contrast=1.15):
+    """A much stronger, Gemini-like regrade than `grade`: hue rotation, cooler cast, brighter, more contrast, poster-like bright areas."""
+    x = rgb.astype(np.float32)/255
+    hsv = cv2.cvtColor(x, cv2.COLOR_RGB2HSV); hsv[..., 0] = (hsv[..., 0] + hue_deg) % 360; hsv[..., 1] = np.clip(hsv[..., 1]*1.25, 0, 1)
+    x = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+    x = x*np.array([1 - cool, 1.0, 1 + cool], np.float32)*gain
+    x = np.clip((x - 0.5)*contrast + 0.5, 0, 1)
+    return (np.clip(x, 0, 1)*255 + 0.5).astype(np.uint8)
+
+def make_generative(orig, out_wh, shift=(0.0, 0.0), zoom=1.0, drift_amp=0.012, drift_sigma=0.12, island=None,
+                    regen=(), seed=7, grade_fn=strong_grade, soften=0.8, jpeg=88):
+    """Simulate a generative tool (Gemini / Nano Banana style) re-render of `orig`:
+    - own output size (out_wh), a different framing (zoom about the centre, shift in output px),
+    - smooth NON-rigid drift of everything (drift_amp = peak shift as a fraction of the output width),
+    - `island`: (cx, cy, r, dx, dy) in output fractions, a 'person' that moved relative to the background,
+    - `regen`: rects (x0, y0, x1, y1) in output fractions whose content is redrawn (different texture),
+    - strong regrade and a bit of lost fine detail, JPEG.
+    Returns (ai rgb uint8, changed mask float32 at the AI's size)."""
+    W, H = out_wh; h, w = orig.shape[:2]
+    big = cv2.resize(orig, (W, H), interpolation=cv2.INTER_AREA)
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    fld = smooth_field(H, W, drift_amp*W, drift_sigma*W, seed)
+    if island is not None:
+        cx, cy, r, dx, dy = island; g = np.exp(-(((xx-cx*W)**2 + (yy-cy*H)**2)/(2*(r*W)**2))).astype(np.float32)
+        fld[..., 0] += g*dx*W; fld[..., 1] += g*dy*W
+    z = 1.0/zoom
+    mx = (xx - W/2)*z + W/2 - shift[0] + fld[..., 0]; my = (yy - H/2)*z + H/2 - shift[1] + fld[..., 1]
+    warped = cv2.remap(big, mx, my, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+    ai = grade_fn(warped)
+    changed = np.zeros((H, W), np.float32)
+    rng = np.random.default_rng(seed + 1)
+    for (x0, y0, x1, y1) in regen:
+        a, b, c, d = int(x0*W), int(y0*H), int(x1*W), int(y1*H)
+        patch, _ = textured(max(d-b, 260), max(c-a, 260), seed=int(rng.integers(1, 10**6))); patch = patch[:d-b, :c-a]
+        ai[b:d, a:c] = (0.15*ai[b:d, a:c] + 0.85*grade_fn(patch)).astype(np.uint8); changed[b:d, a:c] = 1
+    if soften: ai = cv2.GaussianBlur(ai, (0, 0), soften)
+    if jpeg:
+        ok, buf = cv2.imencode(".jpg", ai[..., ::-1], [cv2.IMWRITE_JPEG_QUALITY, jpeg]); ai = cv2.imdecode(buf, 1)[..., ::-1].copy()
+    return ai, changed

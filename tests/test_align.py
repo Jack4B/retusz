@@ -51,3 +51,17 @@ def test_auto_flow_only_when_it_helps(scene):
     o, gt = scene
     ai, T = make_ai(gt, 3, 1.0, (0, 0), 0.05)
     assert A.register(o, ai, flow="auto").flow is None
+
+
+def test_generative_style_ai_grainy_original_registers():
+    """Real-portrait failure of 0.1.4: grainy original, smooth regenerated AI copy with a strong regrade,
+    different framing, non-rigid drift, a moved 'person' and a redrawn patch must still register."""
+    import numpy as np, cv2
+    from synthetic import textured, make_generative
+    o, _ = textured(1500, 1000, seed=21)
+    rng = np.random.default_rng(3)
+    o = np.clip(o.astype(np.float32) + rng.normal(0, 6, o.shape), 0, 255).astype(np.uint8)   # sensor grain
+    ai, _ = make_generative(o, (384, 576), shift=(5, -7), zoom=1.05, drift_amp=0.008,
+                            island=(0.55, 0.45, 0.10, 0.02, -0.01), regen=((0.05, 0.05, 0.55, 0.45),))
+    al = A.register(o, ai, flow="auto")
+    assert al.inliers >= 12 and al.ncc > 0.3 and al.residual_px < 4.0, (al.inliers, al.ncc, al.residual_px)
