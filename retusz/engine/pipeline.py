@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field, asdict, fields
 import numpy as np, cv2
 from . import color as C, faces as F, render as R, modflows as MF, relight as RL, dnb as DNB
-from . import wb as WB, geometry as GEO
+from . import wb as WB, geometry as GEO, tone as TN
 
 GRID = 33
 ANALYSIS_SIDE = 1200   # masks, zones, vignette, skin statistics
@@ -18,20 +18,26 @@ FIT_SIDE = 800         # AI encoder / IDT input
 
 @dataclass
 class Params:
-    """User controls. Ranges: strength/skin/vignette/db 0..1, shadows/highlights -1..1."""
+    """User controls. Ranges: strength/skin/vignette/db/plastic/skin_even/wide 0..1,
+    exposure -2..2 EV, contrast/shadows/highlights/whites/blacks/saturation/vibrance/clarity/temp/tint -1..1."""
     strength: float = 1.0
     skin: float = 1.0
+    exposure: float = 0.0           # 'Ekspozycja' -2..2 EV (linear light + filmic shoulder)
+    contrast: float = 0.0           # 'Kontrast' -1..1 (OKLab S-curve)
     shadows: float = 0.0
     highlights: float = 0.0
+    whites: float = 0.0             # 'Biele' -1..1 (OKLab upper endpoint)
+    blacks: float = 0.0             # 'Czernie' -1..1 (OKLab black point)
     vignette: float = 0.3
     db: float = 0.4
     plastic: float = 0.3            # 'Plastyka 3D'
+    clarity: float = 0.0            # 'Przejrzystość' -1..1 (guided local mid-tone contrast, spares skin)
     light_angle: float | None = None  # 'Kierunek światła' in degrees, None = auto (from the reference)
     saturation: float = 0.0         # 'Nasycenie' -1..1
-    vibrance: float = 0.0           # 'Jaskrawość' -1..1 (boosts dull colours, spares skin)
+    vibrance: float = 0.0           # 'Jaskrawość' -1..1 (OKLab, boosts dull colours, spares skin)
     skin_even: float = 0.3          # 'Równanie skóry' 0..1 (local colour casts on skin, mixed light)
     wide: float = 0.0               # 'Pełne barwy' 0..1: colours as sRGB numbers look on a wide-gamut (AdobeRGB) monitor
-    temp: float = 0.0               # 'Temperatura' -1..1 (white balance, see wb.py)
+    temp: float = 0.0               # 'Temperatura' -1..1 (white balance, Bradford CAT)
     tint: float = 0.0               # 'Odcień' -1..1 (+ = magenta)
     angle: float = 0.0              # straighten, degrees -45..45 (per photo, see geometry.py)
     crop: list | None = None        # [x0, y0, x1, y1] normalised in the straightened frame (per photo)
@@ -46,9 +52,10 @@ class Params:
         names = {f.name for f in fields(cls)}
         p = cls(**{k: v for k, v in (d or {}).items() if k in names})
         if p.light_angle is not None: p.light_angle = float(p.light_angle) % 360
+        p.exposure = float(np.clip(p.exposure, -2.0, 2.0))
         for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even", "wide"):
             setattr(p, k, float(np.clip(getattr(p, k), 0, 1)))
-        for k in ("shadows", "highlights", "saturation", "vibrance", "temp", "tint"):
+        for k in ("contrast", "shadows", "highlights", "whites", "blacks", "clarity", "saturation", "vibrance", "temp", "tint"):
             setattr(p, k, float(np.clip(getattr(p, k), -1, 1)))
         p.strokes = list(p.strokes or [])
         p.angle = float(np.clip(p.angle or 0.0, -45, 45))
@@ -57,7 +64,9 @@ class Params:
         return p
 
     def colour_key(self):
-        return tuple(round(getattr(self, k), 3) for k in ("strength", "shadows", "highlights", "saturation", "vibrance", "wide", "temp", "tint"))
+        return tuple(round(getattr(self, k), 3) for k in (
+            "strength", "exposure", "contrast", "shadows", "highlights", "whites", "blacks",
+            "saturation", "vibrance", "wide", "temp", "tint"))
 
 @dataclass
 class RefAnalysis:
@@ -88,14 +97,14 @@ class Fit:
 
 MASK_SIDE = 400   # skin mask working size (long side) for every resolution
 
-def skin_mask_fixed(src, faces_n, qh, qw):
+def skin_mask_fixed(src, faces_n, qh, qw, subject=None):
     """Skin mask computed at a fixed working size and returned at (qh, qw). Resolution independent on
     purpose: with noisy input (RAW, no in-camera noise reduction) the colour test passed far more shadow
     pixels at full resolution than in the preview, so the export's shadows got the skin LUT."""
     H, W = src.shape[:2]; s = min(1.0, MASK_SIDE/max(H, W))
     mw, mh = max(2, round(W*s)), max(2, round(H*s))
     small = src if (mh, mw) == (H, W) else cv2.resize(src, (mw, mh), interpolation=cv2.INTER_AREA)
-    m = F.skin_mask(small, [f*mw for f in faces_n]).astype(np.float32)
+    m = F.skin_mask(small, [f*mw for f in faces_n], subject=subject).astype(np.float32)
     return m if (mh, mw) == (qh, qw) else cv2.resize(m, (qw, qh), interpolation=cv2.INTER_LINEAR)
 
 def brush_map(strokes, h, w):
@@ -306,21 +315,24 @@ class Engine:
         if hue_k is not None: O[..., 1:] = _apply_hue_chroma(O[..., 1:], hue_k)
         for i in range(3): O[..., 1:] += zone_amt*0.7*d_zone[i]*zw[i][..., None]
         O[..., 0] += offset[0]*np.clip(O[..., 0]/50, 0, 1); O[..., 1] += offset[1]; O[..., 2] += offset[2]
-        O[..., 0] += 12*p.shadows*zw[0] + 12*p.highlights*zw[2]
         if skin_protect: O[..., 1:] -= skin_protect*0.5*(O[..., 1:]-S[..., 1:])
         Cs = np.hypot(S[..., 1], S[..., 2]); Cg = np.hypot(O[..., 1], O[..., 2])+1e-6
         f = np.minimum(1, (Cs*chroma_lim+6)/Cg); O[..., 1] *= f; O[..., 2] *= f
         O[..., 0] = C.rolloff(np.clip(O[..., 0], 0, None)); wf = np.clip((100-O[..., 0])/12, 0, 1); O[..., 1:] *= wf[..., None]**0.5
         O = S + p.strength*(O-S)
-        if p.saturation or p.vibrance:
-            Cc = np.hypot(O[..., 1], O[..., 2]); hue = np.degrees(np.arctan2(O[..., 2], O[..., 1]))
-            skin_hue = np.clip(1-np.abs(hue-48)/30, 0, 1)*np.clip(Cc/8, 0, 1)      # orange-ish skin tones
-            prot = 0.4 if is_skin else 1-0.6*skin_hue
-            f = (1 + p.vibrance*np.clip(1-Cc/55, 0, 1)*prot)*(1 + p.saturation)
-            O[..., 1] *= f; O[..., 2] *= f
         rgb = cv2.cvtColor(O.reshape(-1, 1, 3).astype(np.float32), cv2.COLOR_LAB2RGB).reshape(N, N, N, 3)
         rgb = np.clip(rgb, 0, 1)
-        if p.temp or p.tint: rgb = WB.apply01(rgb, p.temp, p.tint)
+        # Photographic tone & colour edits in linear light + OKLab (work even when strength == 0)
+        has_tone = any((p.exposure, p.contrast, p.highlights, p.shadows, p.whites, p.blacks, p.saturation, p.vibrance))
+        if has_tone:
+            lin = TN.srgb_to_lin(rgb)
+            if p.exposure: lin = TN.apply_exposure_lin(lin, p.exposure)
+            if p.contrast or p.highlights or p.shadows or p.whites or p.blacks:
+                lin = TN.apply_tone_lin(lin, p.contrast, p.highlights, p.shadows, p.whites, p.blacks)
+            if p.saturation or p.vibrance:
+                lin = TN.apply_color_oklab(lin, p.saturation, p.vibrance, is_skin=is_skin)
+            rgb = TN.lin_to_srgb(lin)
+        if p.temp or p.tint: rgb = WB.apply_bradford01(rgb, p.temp, p.tint)
         if p.wide > 0: rgb = rgb + p.wide*(wide_gamut_look(rgb) - rgb)
         return rgb.astype(np.float32)
 
@@ -343,18 +355,22 @@ class Engine:
         H, W = src.shape[:2]; qh, qw = max(2, H//4), max(2, W//4)
         lut_bg, lut_sk = self.bake(fit, p)
         q = cv2.resize(src, (qw, qh), interpolation=cv2.INTER_AREA)
-        mq_raw = skin_mask_fixed(src, fit.faces_n, qh, qw)
+        subj = fit.relight.fg if (fit.relight is not None and getattr(fit.relight, "fg", None) is not None) else None
+        mq_raw = skin_mask_fixed(src, fit.faces_n, qh, qw, subject=subj)
         mq = mq_raw*p.skin
         gain = np.zeros((qh, qw, 3), np.float32)
         need_vig = p.vignette > 0 and np.any(fit.vig_diff < 0)
         need_3d = p.plastic > 0 and fit.relight is not None
         need_even = p.skin_even > 0 and fit.faces_n and mq_raw.max() > 0.3
-        if need_vig or need_3d or need_even:
+        need_clarity = abs(p.clarity) > 1e-4
+        if need_vig or need_3d or need_even or need_clarity:
             base_q = R.render(q, lut_bg, lut_sk, mq, gain); lab_q = C.to_lab(base_q); Lq = lab_q[..., 0]
         if need_even:
             gain += skin_even_gain(base_q, lab_q, mq_raw, [f*qw for f in fit.faces_n], p.skin_even)
         if need_3d:
-            gain += fit.relight.gain(qh, qw, Lq, p.plastic, p.light_angle)[..., None]
+            gain += fit.relight.gain(qh, qw, Lq, p.plastic, p.light_angle, rgb_q=base_q)[..., None]
+        if need_clarity:
+            gain += TN.clarity_gain(Lq, mq_raw, p.clarity)[..., None]
         if need_vig:
             rad = C.radial(qh, qw); n = len(fit.vig_diff); idx = np.clip(rad*n-0.5, 0, n-1)
             dL = cv2.GaussianBlur(np.interp(idx, np.arange(n), fit.vig_diff).astype(np.float32), (0, 0), max(qh, qw)/80)

@@ -54,13 +54,16 @@ def lightness(rgb8):
     Y = _LUT_LIN[rgb8[..., 0]]*_LW[0]; Y += _LUT_LIN[rgb8[..., 1]]*_LW[1]; Y += _LUT_LIN[rgb8[..., 2]]*_LW[2]
     return _Y_to_L(Y)
 
+from .color import fast_guided_rgb
+
 # ---------------------------------------------------------------- edge-preserving bases (candidates)
 def weighted_guided(I, w, r, eps):
-    """Self-guided filter with per-pixel data weights (normalised box means): non-skin pixels do not enter."""
+    """Self-guided filter with per-pixel data weights (normalised box means in both passes): non-skin
+    pixels neither enter local statistics nor bias the averaged linear coefficients (a, b)."""
     W = _box(w, r) + 1e-6
     m = _box(I*w, r)/W; v = _box(I*I*w, r)/W - m*m
     a = v/(v + eps); b = m - a*m
-    return _box(a, r)*I + _box(b, r)
+    return (_box(a*w, r)/W)*I + (_box(b*w, r)/W)
 
 def wls(g, w, lam, alpha=1.2, eps=1e-4, iters=250):
     """Weighted least squares smoothing (Farbman, Fattal, Lischinski, Szeliski 2008), data weight w:
@@ -212,12 +215,12 @@ def dodge_burn_v2(rgb, skin, faces_px, lms_px, strength, method="guided"):
     la = None if not lms_px else [(np.asarray(l, np.float32) - [x0, y0])*[kx, ky] for l in lms_px]
     fa_, ma_ = dnb_field(La, ma, fa, la, strength, method)
     if not np.any(fa_*ma_): return rgb
-    # back to the crop's resolution: the smooth field as is, the mask's edges snapped to the image's own edges
-    # (fast guided filter, guide = this resolution's L*), so nothing glows into hair, frames or background
+    # back to the crop's resolution: the smooth field as is, the mask's edges snapped to the image's own RGB
+    # boundaries (fast 3-channel guided filter, He & Sun 2015), so nothing glows into hair, frames or background
     field = cv2.resize(fa_, (x1-x0, y1-y0), interpolation=cv2.INTER_CUBIC)
     mask = cv2.resize(ma_, (x1-x0, y1-y0), interpolation=cv2.INTER_LINEAR)
     s = max(1.0, (x1-x0)/aw)
-    mask = np.clip(fast_guided(lightness(crop)/100, mask, max(2, round(3*s)), 1e-3, s), 0, 1)
+    mask = np.clip(fast_guided_rgb(crop.astype(np.float32)/255.0, mask, max(2, round(3*s)), 1e-3, s), 0, 1)
     dL = field*mask
     m = max(4, int(0.15*fw))                                    # feather at the region border (not at image borders)
     wy = np.clip(np.minimum(np.arange(y1-y0), np.arange(y1-y0)[::-1])/m, 0, 1)

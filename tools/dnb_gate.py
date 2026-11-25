@@ -34,7 +34,15 @@ METHODS = ("gauss", "guided", "wls")
 def Lab(x): return C.to_lab(x)
 def Lstar(x): return Lab(x)[..., 0]
 
-def nblur(x, w, s): return cv2.GaussianBlur(x*w, (0, 0), s)/(cv2.GaussianBlur(w, (0, 0), s) + 1e-6)
+def _gblur(a, s):
+    if s <= 16: return cv2.GaussianBlur(a, (0, 0), s)
+    h, w = a.shape[:2]; k = max(2, int(s / 10))
+    sw, sh = max(2, round(w / k)), max(2, round(h / k))
+    sm = cv2.resize(a, (sw, sh), interpolation=cv2.INTER_AREA)
+    bl = cv2.GaussianBlur(sm, (0, 0), s * sw / w, sigmaY=s * sh / h)
+    return cv2.resize(bl, (w, h), interpolation=cv2.INTER_LINEAR)
+
+def nblur(x, w, s): return _gblur(x*w, s)/(_gblur(w, s) + 1e-6)
 
 def ring(mask, lo, hi, outside=True):
     p = (mask > 0.5).astype(np.uint8); d = cv2.distanceTransform(1 - p if outside else p, cv2.DIST_L2, 5)
@@ -77,8 +85,9 @@ def apply_dnb(case, s, algo):
 
 def apply_plastic(rgb, case, s, old, angle=120.0):
     H, W = rgb.shape[:2]; qh, qw = max(2, H//4), max(2, W//4)
-    Lq = Lstar(cv2.resize(rgb, (qw, qh), interpolation=cv2.INTER_AREA))
-    g = relight_gain_v1(case["rl"], case["skin_a"], qh, qw, Lq, s, angle) if old else case["rl"].gain(qh, qw, Lq, s, angle)
+    rgb_q = cv2.resize(rgb, (qw, qh), interpolation=cv2.INTER_AREA)
+    Lq = Lstar(rgb_q)
+    g = relight_gain_v1(case["rl"], case["skin_a"], qh, qw, Lq, s, angle) if old else case["rl"].gain(qh, qw, Lq, s, angle, rgb_q=rgb_q)
     up = R._bilinear_up(g.astype(np.float32), H, W)[..., None]
     return np.clip(rgb.astype(np.float32)*(1 + up) + 0.5, 0, 255).astype(np.uint8)
 
@@ -87,56 +96,96 @@ def look(case, s, old):
     return apply_plastic(out, case, s, old)
 
 # ---------------------------------------------------------------- metrics
-def skin_metrics(case, out):
-    rgb = case["rgb"]; fw = case["fw"]; L0, L1 = Lstar(rgb), Lstar(out)
+def _skin_ref(case):
+    ref = case.get("_skin_ref")
+    if ref is not None: return ref
+    rgb = case["rgb"]; fw = case["fw"]; a = Lab(rgb); L0 = a[..., 0]
     w = (case["skin"] > 0.5).astype(np.float32)
     core = cv2.erode((case["skin"] > 0.9).astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
+    w1 = _gblur(w, fw/80) + 1e-6
+    w2 = _gblur(w, fw/12) + 1e-6
     if case["skin_true"] is None:                              # photos: clean skin = skin without strong features
         lev = nblur(L0, w, fw/14); core &= np.abs(L0 - lev) < 10
-    band = lambda L: nblur(L, w, fw/80) - nblur(L, w, fw/12)
-    r = {}
-    if case["blotch"] is not None:
-        bt = band(case["blotch"].astype(np.float32))[core]
-        sl = lambda L: float(np.dot(band(L)[core], bt)/np.dot(bt, bt)); r["blotch_left"] = sl(L1)/sl(L0)
-    else:
-        r["blotch_left"] = float(np.sqrt(band(L1)[core].var()/max(band(L0)[core].var(), 1e-9)))
-    hp = lambda L: L - cv2.GaussianBlur(L, (0, 0), 1.2); lp = lambda L: cv2.GaussianBlur(L, (0, 0), fw/6)
-    r["hf"] = float(hp(L1)[core].std()/hp(L0)[core].std()); r["model_lp"] = float(lp(L1)[core].std()/lp(L0)[core].std())
+    band = lambda L: _gblur(L*w, fw/80)/w1 - _gblur(L*w, fw/12)/w2
+    b0 = band(L0)[core]
+    bt = band(case["blotch"].astype(np.float32))[core] if case["blotch"] is not None else None
+    b0_den = float(np.dot(b0, bt)/np.dot(bt, bt)) if bt is not None else float(max(b0.var(), 1e-9))
+    hp0 = float((L0 - _gblur(L0, 1.2))[core].std())
+    lp0 = float(_gblur(L0, fw/6)[core].std())
+    nose = None
     if case["nose"] is not None:
-        ns = case["nose"]; ins = core & (ns > 0.9); o_ = core & (cv2.dilate((ns > 0.05).astype(np.uint8), np.ones((15, 15), np.uint8)) > 0) & (ns < 0.05)
-        st = lambda L: L[o_].mean() - L[ins].mean(); r["nose"] = float(st(L1)/st(L0))
-    dL = np.abs(L1 - L0); sk = (case["skin"] > 0.5).astype(np.uint8)
+        ns = case["nose"]; ins = core & (ns > 0.9)
+        o_ = core & (cv2.dilate((ns > 0.05).astype(np.uint8), np.ones((15, 15), np.uint8)) > 0) & (ns < 0.05)
+        nose = (ins, o_, float(L0[o_].mean() - L0[ins].mean()))
+    sk = (case["skin"] > 0.5).astype(np.uint8)
     feat = case["features"] > 0.5 if case["features"] is not None else np.zeros_like(core)
     rg = ring(sk, 0, fw/8) & ~feat
-    r["ring_dL"] = float(dL[rg].mean()); r["feat_dL"] = float(dL[feat].mean()) if feat.any() else 0.0
-    a, b = Lab(rgb), Lab(out); dark = core & (b[..., 0] < a[..., 0] - 1)
-    sat = lambda lab: np.hypot(lab[..., 1], lab[..., 2])/(lab[..., 0] + 16)
-    r["sat"] = float(sat(b)[dark].mean()/sat(a)[dark].mean()) if dark.sum() > 50 else 1.0
-    r["ab_dE"] = float(np.linalg.norm(b[..., 1:] - a[..., 1:], axis=2)[w > 0].mean())
-    clip = lambda x: float((x.max(2) >= 254).mean()*100); r["clip_add_pct"] = clip(out) - clip(rgb)
+    sat0 = np.hypot(a[..., 1], a[..., 2])/(L0 + 16)
+    clip0 = float((rgb.max(2) >= 254).mean()*100)
+    ref = dict(a=a, L0=L0, w=w, wm=w > 0, core=core, band=band, bt=bt, b0_den=b0_den,
+               hp0=hp0, lp0=lp0, nose=nose, feat=feat, rg=rg, sat0=sat0, clip0=clip0)
+    case["_skin_ref"] = ref
+    return ref
+
+def skin_metrics(case, out):
+    ref = _skin_ref(case); fw = case["fw"]
+    a, L0, core = ref["a"], ref["L0"], ref["core"]
+    b = Lab(out); L1 = b[..., 0]
+    r = {}
+    b1 = ref["band"](L1)[core]
+    if ref["bt"] is not None:
+        bt = ref["bt"]; r["blotch_left"] = float(np.dot(b1, bt)/np.dot(bt, bt))/ref["b0_den"]
+    else:
+        r["blotch_left"] = float(np.sqrt(b1.var()/ref["b0_den"]))
+    r["hf"] = float((L1 - _gblur(L1, 1.2))[core].std()/ref["hp0"])
+    r["model_lp"] = float(_gblur(L1, fw/6)[core].std()/ref["lp0"])
+    if ref["nose"] is not None:
+        ins, o_, st0 = ref["nose"]; r["nose"] = float((L1[o_].mean() - L1[ins].mean())/st0)
+    dL = np.abs(L1 - L0)
+    r["ring_dL"] = float(dL[ref["rg"]].mean()); r["feat_dL"] = float(dL[ref["feat"]].mean()) if ref["feat"].any() else 0.0
+    dark = core & (L1 < L0 - 1)
+    sat1 = np.hypot(b[..., 1], b[..., 2])/(L1 + 16)
+    r["sat"] = float(sat1[dark].mean()/ref["sat0"][dark].mean()) if dark.sum() > 50 else 1.0
+    r["ab_dE"] = float(np.linalg.norm(b[..., 1:] - a[..., 1:], axis=2)[ref["wm"]].mean())
+    r["clip_add_pct"] = float((out.max(2) >= 254).mean()*100) - ref["clip0"]
     r["max_dL"] = float(dL.max())
     return r
 
+def _look_ref(case):
+    ref = case.get("_look_ref")
+    if ref is not None: return ref
+    rgb = case["rgb"]; H, W = rgb.shape[:2]; L0 = _skin_ref(case)["L0"]; p = case["person"]
+    pm = p > 0.5; wp = pm.astype(np.float32)
+    no, fo, far = ring(p, 0, 0.03*W), ring(p, 0.06*W, 0.12*W), ring(p, 0.15*W, 10*W)
+    rin0, rin1 = ring(p, 0, 0.03*W, False), ring(p, 0.03*W, 0.06*W, False)
+    wp_blur = _gblur(wp, 0.015*W) + 1e-6
+    bands = dict(fine=(1, 2), mid=(W/250, W/60), coarse=(W/30, W/15))
+    b0s = {}
+    for k, (a, b) in bands.items():
+        b0 = _gblur(L0, a) - _gblur(L0, b)
+        b0s[k] = (float(b0.std()), float(b0[pm].std()))
+    bgr = ring(p, 0, 0.12*W)
+    sep0 = float(max(abs(L0[pm].mean() - L0[bgr].mean()), 1e-6))
+    ref = dict(L0=L0, W=W, pm=pm, wp=wp, wp_blur=wp_blur, no=no, fo=fo, far=far,
+               rin0=rin0, rin1=rin1, bands=bands, b0s=b0s, bgr=bgr, sep0=sep0)
+    case["_look_ref"] = ref
+    return ref
+
 def look_metrics(case, out):
-    rgb = case["rgb"]; H, W = rgb.shape[:2]; L0, L1 = Lstar(rgb), Lstar(out); dL = L1 - L0
-    p = case["person"]
-    no, fo = ring(p, 0, 0.03*W), ring(p, 0.06*W, 0.12*W)
-    far = ring(p, 0.15*W, 10*W)
+    ref = _look_ref(case); W = ref["W"]; L0 = ref["L0"]; L1 = Lstar(out); dL = L1 - L0
     # inside, Plastyka 3D shades the body on purpose (a broad ramp towards the edges); a halo is a narrow line along
     # the outline (bright on one side, dark on another: a ring average cancels it). Local measure: |dL - dL smoothed
     # inside the person (sigma 1.5 % of the width)| in the 0-3 % band minus the same in the 3-6 % band.
-    wp = (p > 0.5).astype(np.float32); dev = np.abs(dL - nblur(dL, wp, 0.015*W))
-    rim = float(dev[ring(p, 0, 0.03*W, False)].mean() - dev[ring(p, 0.03*W, 0.06*W, False)].mean())
-    r = dict(halo_out=float(abs(dL[no].mean() - dL[fo].mean())), halo_in=rim,
-             bg_far=float(abs(dL[far].mean())) if far.any() else 0.0)
-    bands = dict(fine=(1, 2), mid=(W/250, W/60), coarse=(W/30, W/15))
-    pm = p > 0.5
-    for k, (a, b) in bands.items():
-        bd = lambda L: cv2.GaussianBlur(L, (0, 0), a) - cv2.GaussianBlur(L, (0, 0), b)
-        b0, b1 = bd(L0), bd(L1)
-        r[f"contrast_{k}"] = float(b1.std()/b0.std()); r[f"contrast_{k}_person"] = float(b1[pm].std()/b0[pm].std())
-    bgr = ring(p, 0, 0.12*W)
-    sep = lambda L: abs(L[pm].mean() - L[bgr].mean()); r["separation"] = float(sep(L1)/max(sep(L0), 1e-6))
+    dev = np.abs(dL - _gblur(dL*ref["wp"], 0.015*W)/ref["wp_blur"])
+    rim = float(dev[ref["rin0"]].mean() - dev[ref["rin1"]].mean())
+    r = dict(halo_out=float(abs(dL[ref["no"]].mean() - dL[ref["fo"]].mean())), halo_in=rim,
+             bg_far=float(abs(dL[ref["far"]].mean())) if ref["far"].any() else 0.0)
+    pm = ref["pm"]
+    for k, (a, b) in ref["bands"].items():
+        b1 = _gblur(L1, a) - _gblur(L1, b)
+        s0, sp0 = ref["b0s"][k]
+        r[f"contrast_{k}"] = float(b1.std()/s0); r[f"contrast_{k}_person"] = float(b1[pm].std()/sp0)
+    r["separation"] = float(abs(L1[pm].mean() - L1[ref["bgr"]].mean())/ref["sep0"])
     return r
 
 def prev_export(case, s):

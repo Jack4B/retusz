@@ -44,3 +44,10 @@ def test_light_angle_roundtrip(tmp_path):
     a, = _photos(tmp_path, 1); s = Series(tmp_path)
     s.set_override(a, Params(light_angle=135.0, plastic=0.9))
     p = Series(tmp_path).params_for(a); assert p.light_angle == 135.0 and p.plastic == 0.9
+
+def test_tone_params_roundtrip(tmp_path):
+    a, = _photos(tmp_path, 1); s = Series(tmp_path)
+    s.set_override(a, Params(exposure=0.85, contrast=0.35, whites=0.2, blacks=-0.25, clarity=-0.4))
+    p = Series(tmp_path).params_for(a)
+    assert p.exposure == 0.85 and p.contrast == 0.35 and p.whites == 0.2 and p.blacks == -0.25 and p.clarity == -0.4
+

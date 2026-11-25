@@ -39,14 +39,35 @@ def canvas_xy(v, u, w_):
 def script():
     global ok
     wait_result(); grab("10_glowne.png")
-    g0 = geom(); app.light_auto.deselect(); app._light_auto()
+    g0 = geom()
+    # Test new tone sliders (including EV formatting) and tab switch stability
+    for k, vals in (("exposure", (-200, 125, 0)), ("contrast", (-100, 100, 0)), ("whites", (-100, 100, 0)), ("blacks", (-100, 100, 0)),
+                    ("saturation", (-100, 100, 0)), ("vibrance", (-100, 100, 0))):
+        s = app.sliders[k][0]
+        for v in vals: s.set(v); app._slider(k, v); pump(2)
+        if geom() != g0: print("LAYOUT CHANGED by", k); ok = False
+    # Double-click reset + Undo / Redo + Copy / Paste + Before / After
+    app.sliders["exposure"][0].set(100); app._slider("exposure", 100); app._commit_history(); pump(2)
+    app._reset_slider("exposure"); pump(2)
+    if abs(app.params.exposure) > 1e-4: print("RESET SLIDER FAILED"); ok = False
+    app.undo(); pump(2)
+    if abs(app.params.exposure - 1.0) > 1e-3: print("UNDO FAILED", app.params.exposure); ok = False
+    app.redo(); pump(2)
+    if abs(app.params.exposure) > 1e-4: print("REDO FAILED", app.params.exposure); ok = False
+    app.toggle_before(True); pump(3); app.toggle_before(False); pump(2)
+    # Switch to second slider tab ("Wzorzec i Portret") and check stability + capture screenshot
+    app.slider_tabs.set("Wzorzec i Portret"); app._slider_tab("Wzorzec i Portret"); pump(4)
+    grab("10b_wzorzec_portret.png")
+    if geom() != g0: print("LAYOUT CHANGED by slider tab"); ok = False
+    app.light_auto.deselect(); app._light_auto()
     for a in range(0, 360, 15):
         app.light.set(a); app._light(a); pump(2)
         if geom() != g0: print("LAYOUT CHANGED at", a, geom(), g0); ok = False; break
-    for k in ("saturation", "vibrance", "skin_even"):
+    for k in ("skin_even", "clarity"):
         s = app.sliders[k][0]
-        for v in (-100, 100, 0): s.set(v); app._slider(k, v); pump(2)
+        for v in (0, 100, 0) if k == "skin_even" else (-100, 100, 0): s.set(v); app._slider(k, v); pump(2)
         if geom() != g0: print("LAYOUT CHANGED by", k); ok = False
+    app.slider_tabs.set("Światło i Kolor"); app._slider_tab("Światło i Kolor"); pump(3)
     print("layout stable:", ok, flush=True)
     app.light_auto.select(); app._light_auto(); app.result = None; wait_result()
     # zoom 200% around a point, check to_norm consistency

@@ -29,17 +29,34 @@ def grid_lab(N=33):
     G = rgb_grid(N); return G, cv2.cvtColor(G.reshape(-1, 1, 3), cv2.COLOR_RGB2LAB).reshape(N, N, N, 3)
 
 def apply_lut(rgb, lut):
-    """Trilinear lookup of uint8 RGB (any shape [...,3]) in an N^3 LUT; returns float32 LUT values."""
-    N = lut.shape[0]; x = rgb.astype(np.float32)/255*(N-1)
-    i0 = np.clip(np.floor(x).astype(np.int32), 0, N-2); f = x-i0
-    out = np.zeros(rgb.shape[:-1] + (lut.shape[-1],), np.float32)
-    for dr in (0, 1):
-        wr = f[..., 0] if dr else 1-f[..., 0]
-        for dg in (0, 1):
-            wg = f[..., 1] if dg else 1-f[..., 1]
-            for db in (0, 1):
-                wb = f[..., 2] if db else 1-f[..., 2]
-                out += (wr*wg*wb)[..., None]*lut[i0[..., 0]+dr, i0[..., 1]+dg, i0[..., 2]+db]
+    """Tetrahedral lookup (Sakamoto 1974 / Kasson et al. 1995) of uint8 RGB (any shape [...,3]) in an
+    N^3 LUT; 4 corners per pixel, exact neutral diagonal (R=G=B), ~2x lower error than trilinear."""
+    N = lut.shape[0]; x = rgb.astype(np.float32)/255.0*(N - 1)
+    i0 = np.clip(np.floor(x).astype(np.int32), 0, N - 2); f = x - i0
+    r0, g0, b0 = i0[..., 0], i0[..., 1], i0[..., 2]
+    fr, fg, fb = f[..., 0], f[..., 1], f[..., 2]
+    v000 = lut[r0, g0, b0]; v111 = lut[r0 + 1, g0 + 1, b0 + 1]
+    out = np.empty(rgb.shape[:-1] + (lut.shape[-1],), np.float32)
+    c1 = (fr >= fg) & (fg >= fb)
+    c2 = (fr >= fg) & (~c1) & (fr >= fb)
+    c3 = (fr >= fg) & (~c1) & (~c2)
+    c4 = (~(fr >= fg)) & (fb > fg)
+    c5 = (~(fr >= fg)) & (~c4) & (fb > fr)
+    c6 = (~(fr >= fg)) & (~c4) & (~c5)
+    for mask, da, db, w0, wa, wb, w1 in (
+        (c1, (1, 0, 0), (1, 1, 0), 1 - fr, fr - fg, fg - fb, fb),
+        (c2, (1, 0, 0), (1, 0, 1), 1 - fr, fr - fb, fb - fg, fg),
+        (c3, (0, 0, 1), (1, 0, 1), 1 - fb, fb - fr, fr - fg, fg),
+        (c4, (0, 0, 1), (0, 1, 1), 1 - fb, fb - fg, fg - fr, fr),
+        (c5, (0, 1, 0), (0, 1, 1), 1 - fg, fg - fb, fb - fr, fr),
+        (c6, (0, 1, 0), (1, 1, 0), 1 - fg, fg - fr, fr - fb, fb),
+    ):
+        if not np.any(mask): continue
+        rm, gm, bm = r0[mask], g0[mask], b0[mask]
+        va = lut[rm + da[0], gm + da[1], bm + da[2]]
+        vb = lut[rm + db[0], gm + db[1], bm + db[2]]
+        out[mask] = (w0[mask, None]*v000[mask] + wa[mask, None]*va
+                     + wb[mask, None]*vb + w1[mask, None]*v111[mask])
     return out
 
 def apply_lut_fast(rgb, lut):
@@ -145,3 +162,46 @@ def swd(a, b, n=64, seed=0):
         v = rng.normal(size=3); v /= np.linalg.norm(v)
         d.append(np.abs(np.quantile(A@v, q)-np.quantile(B@v, q)).mean())
     return float(np.mean(d))
+
+def guided_refine_rgb(I, p, r, eps=1e-3):
+    """3-channel colour guided filter (He, Sun, Tang, ECCV 2010 / TPAMI 2013, eq. 14-16).
+    I: float32 HxWx3 in 0..1, p: float32 HxW. Snaps p's edges to both luminance and chroma edges of I."""
+    r = max(1, int(r)); k = (2*r + 1, 2*r + 1)
+    box = lambda x: cv2.boxFilter(x, -1, k)
+    R, G, B = I[..., 0], I[..., 1], I[..., 2]
+    mR, mG, mB, mp = box(R), box(G), box(B), box(p)
+    vrr = box(R*R) - mR*mR + eps; vrg = box(R*G) - mR*mG; vrb = box(R*B) - mR*mB
+    vgg = box(G*G) - mG*mG + eps; vgb = box(G*B) - mG*mB; vbb = box(B*B) - mB*mB + eps
+    crp = box(R*p) - mR*mp; cgp = box(G*p) - mG*mp; cbp = box(B*p) - mB*mp
+    c00 = vgg*vbb - vgb*vgb; c01 = vrb*vgb - vrg*vbb; c02 = vrg*vgb - vrb*vgg
+    c11 = vrr*vbb - vrb*vrb; c12 = vrg*vrb - vrr*vgb; c22 = vrr*vgg - vrg*vrg
+    inv = 1.0/(vrr*c00 + vrg*c01 + vrb*c02 + 1e-12)
+    aR = (c00*crp + c01*cgp + c02*cbp)*inv
+    aG = (c01*crp + c11*cgp + c12*cbp)*inv
+    aB = (c02*crp + c12*cgp + c22*cbp)*inv
+    b = mp - aR*mR - aG*mG - aB*mB
+    return (box(aR)*R + box(aG)*G + box(aB)*B + box(b)).astype(np.float32)
+
+def fast_guided_rgb(I, p, r, eps=1e-3, s=4.0):
+    """Fast 3-channel guided filter (He & Sun 2015): linear coefficients at 1/s resolution, applied at full-res."""
+    h, w = p.shape
+    if s <= 1.05: return guided_refine_rgb(I, p, r, eps)
+    sw, sh = max(2, round(w/s)), max(2, round(h/s)); rs = max(1, round(r/s)); k = (2*rs + 1, 2*rs + 1)
+    box = lambda x: cv2.boxFilter(x, -1, k)
+    Is = cv2.resize(I, (sw, sh), interpolation=cv2.INTER_AREA)
+    ps = cv2.resize(p, (sw, sh), interpolation=cv2.INTER_AREA)
+    R, G, B = Is[..., 0], Is[..., 1], Is[..., 2]
+    mR, mG, mB, mp = box(R), box(G), box(B), box(ps)
+    vrr = box(R*R) - mR*mR + eps; vrg = box(R*G) - mR*mG; vrb = box(R*B) - mR*mB
+    vgg = box(G*G) - mG*mG + eps; vgb = box(G*B) - mG*mB; vbb = box(B*B) - mB*mB + eps
+    crp = box(R*ps) - mR*mp; cgp = box(G*ps) - mG*mp; cbp = box(B*ps) - mB*mp
+    c00 = vgg*vbb - vgb*vgb; c01 = vrb*vgb - vrg*vbb; c02 = vrg*vgb - vrb*vgg
+    c11 = vrr*vbb - vrb*vrb; c12 = vrg*vrb - vrr*vgb; c22 = vrr*vgg - vrg*vrg
+    inv = 1.0/(vrr*c00 + vrg*c01 + vrb*c02 + 1e-12)
+    aR = box((c00*crp + c01*cgp + c02*cbp)*inv)
+    aG = box((c01*crp + c11*cgp + c12*cbp)*inv)
+    aB = box((c02*crp + c12*cgp + c22*cbp)*inv)
+    b = box(mp - aR*mR - aG*mG - aB*mB)
+    up = lambda x: cv2.resize(x, (w, h), interpolation=cv2.INTER_LINEAR)
+    return (up(aR)*I[..., 0] + up(aG)*I[..., 1] + up(aB)*I[..., 2] + up(b)).astype(np.float32)
+

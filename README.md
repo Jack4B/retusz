@@ -1,11 +1,31 @@
-# Retusz 0.1.6
+# Retusz 0.1.7
 
 Aplikacja na Windows: przenosi wygląd Twojego wzorca (np. zdjęcia obrobionego w Photoshopie) na całą serię zdjęć,
-dodaje **Plastykę 3D** (światło kierunkowe z mapy głębi) i subtelny **dodge & burn**. Autor: Jack4B.
+oferuje precyzyjną obróbkę tonalną i barwną w przestrzeni OKLab (Ekspozycja EV, Kontrast, Światła/Cienie, Biele/Czernie,
+Balans bieli Bradford CAT, Przejrzystość), **Plastykę 3D** (światło kierunkowe z mapy głębi) i subtelny **dodge & burn**. Autor: Jack4B.
 
 ## Kontrola jakości
 
 `tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--pair-export EKSPORT WZORZEC` ocenia gotowy eksport.
+
+### 0.1.7
+- **Nowe parametry obróbki i silnik tonalny OKLab** (działają także przy `Siła kolorów = 0%`, w tablicy 3D LUT bez kosztu wydajności; podgląd = eksport ΔE < 1):
+  - **Ekspozycja (−2,00…+2,00 EV)** w świetle liniowym z filmowym, zachowującym barwę łagodzeniem świateł (koniec z żółtym przepalaniem skóry);
+  - **Kontrast** (monotoniczna krzywa S w OKLab wokół szarości 18%, bez przesycania skóry), **Biele** i **Czernie** (punkty końcowe niezależne od Świateł/Cieni);
+  - **Jaskrawość i Nasycenie w OKLab** ze stałym odcieniem przy kompresji gamutu (niebieskie niebo nie skręca już w fiolet);
+  - **Przejrzystość (−100…+100)** – bezhalowy kontrast lokalny półtonów na filtrze prowadzonym, chroniący fakturę skóry (ujemna daje miękki, portretowy blask).
+- **Najwyższa jakość algorytmów silnika**:
+  - **Interpolacja tetraedryczna LUT 3D** (4 narożniki zamiast 8 w jądrze numba): mniejszy błąd barwy i idealnie neutralna oś szarości;
+  - **Balans bieli Bradford CAT** (standard CIE/ICC w przestrzeni czopków): naturalniejsza skóra i niebo przy mocnych korektach, dokładna jedno-klikowa pipeta;
+  - **Plastyka 3D – segmentacja postaci (GrabCut + 3-kanałowy filtr prowadzony RGB)**: odcina fragmenty tła, które model głębi uznał za bliskie i stykające się z głową lub ramionami;
+  - **Czysta maska skóry** (`faces.skin_mask`): kalibracja na rdzeniu policzków/czoła + spójność z rdzeniem twarzy + dociągnięcie filtrem prowadzonym RGB — odrzuca ciemnobrązowe włosy i skóropodobne plamy tła zanim trafią do LUT skóry;
+  - **Dodge & Burn v2**: dwustronnie ważony filtr prowadzony i 3-kanałowe dociąganie maski po krawędziach RGB.
+- **Przegląd i ulepszenia UX/UI**:
+  - przejrzysty, dwuzakładkowy panel suwaków (**Światło i Kolor** / **Wzorzec i Portret**) o stałej wysokości (zero skakania układu);
+  - **dwuklik na dowolnym suwaku** (lub etykiecie) przywraca jego wartość domyślną; aktywne wartości są wyróżnione;
+  - pełne **Cofnij / Ponów** (`Ctrl+Z` / `Ctrl+Y`) dla wszystkich edycji, **Kopiuj / Wklej ustawienia** (`Ctrl+Shift+C` / `Ctrl+Shift+V`) między zdjęciami serii oraz **Zeruj** suwaki;
+  - szybkie **Przed/Po (`\`)** w głównym widoku (także przy 100%) oraz skrót **`M`** dla podglądu maski skóry;
+  - poprawione okno **Ustawienia → Eksport** (przyciski Zapisz/Anuluj zawsze widoczne; suwaki własnego wyostrzania wyszarzone dla gotowych trybów Ekran/Druk).
 
 ### 0.1.6
 - **Dodge & burn od nowa** – naturalny także przy 100%:

@@ -50,17 +50,42 @@ if HAVE_NUMBA:
                 r = src[y, x, 0]*s; gg = src[y, x, 1]*s; b = src[y, x, 2]*s
                 ir = min(int(r), N-2); ig = min(int(gg), N-2); ib = min(int(b), N-2)
                 fr = r-ir; fg = gg-ig; fb = b-ib
-                acc0 = 0.0; acc1 = 0.0; acc2 = 0.0
-                for dr in range(2):
-                    wr = fr if dr else 1-fr
-                    for dg in range(2):
-                        wg = fg if dg else 1-fg
-                        for db in range(2):
-                            w = wr*wg*(fb if db else 1-fb)
-                            a0 = lut_bg[ir+dr, ig+dg, ib+db, 0]; a1 = lut_bg[ir+dr, ig+dg, ib+db, 1]; a2 = lut_bg[ir+dr, ig+dg, ib+db, 2]
-                            if m > 0.002:
-                                a0 += m*(lut_sk[ir+dr, ig+dg, ib+db, 0]-a0); a1 += m*(lut_sk[ir+dr, ig+dg, ib+db, 1]-a1); a2 += m*(lut_sk[ir+dr, ig+dg, ib+db, 2]-a2)
-                            acc0 += w*a0; acc1 += w*a1; acc2 += w*a2
+                # Tetrahedral interpolation (Sakamoto 1974 / Kasson 1995): 4 corners, exact neutral axis
+                if fr >= fg:
+                    if fg >= fb:
+                        w0 = 1.0 - fr; wa = fr - fg; wb = fg - fb; w1 = fb
+                        ar = 1; ag = 0; ab = 0; br = 1; bg_ = 1; bb = 0
+                    elif fr >= fb:
+                        w0 = 1.0 - fr; wa = fr - fb; wb = fb - fg; w1 = fg
+                        ar = 1; ag = 0; ab = 0; br = 1; bg_ = 0; bb = 1
+                    else:
+                        w0 = 1.0 - fb; wa = fb - fr; wb = fr - fg; w1 = fg
+                        ar = 0; ag = 0; ab = 1; br = 1; bg_ = 0; bb = 1
+                else:
+                    if fb > fg:
+                        w0 = 1.0 - fb; wa = fb - fg; wb = fg - fr; w1 = fr
+                        ar = 0; ag = 0; ab = 1; br = 0; bg_ = 1; bb = 1
+                    elif fb > fr:
+                        w0 = 1.0 - fg; wa = fg - fb; wb = fb - fr; w1 = fr
+                        ar = 0; ag = 1; ab = 0; br = 0; bg_ = 1; bb = 1
+                    else:
+                        w0 = 1.0 - fg; wa = fg - fr; wb = fr - fb; w1 = fb
+                        ar = 0; ag = 1; ab = 0; br = 1; bg_ = 1; bb = 0
+                v00 = lut_bg[ir, ig, ib, 0]; v01 = lut_bg[ir, ig, ib, 1]; v02 = lut_bg[ir, ig, ib, 2]
+                va0 = lut_bg[ir+ar, ig+ag, ib+ab, 0]; va1 = lut_bg[ir+ar, ig+ag, ib+ab, 1]; va2 = lut_bg[ir+ar, ig+ag, ib+ab, 2]
+                vb0 = lut_bg[ir+br, ig+bg_, ib+bb, 0]; vb1 = lut_bg[ir+br, ig+bg_, ib+bb, 1]; vb2 = lut_bg[ir+br, ig+bg_, ib+bb, 2]
+                v10 = lut_bg[ir+1, ig+1, ib+1, 0]; v11 = lut_bg[ir+1, ig+1, ib+1, 1]; v12 = lut_bg[ir+1, ig+1, ib+1, 2]
+                acc0 = w0*v00 + wa*va0 + wb*vb0 + w1*v10
+                acc1 = w0*v01 + wa*va1 + wb*vb1 + w1*v11
+                acc2 = w0*v02 + wa*va2 + wb*vb2 + w1*v12
+                if m > 0.002:
+                    s00 = lut_sk[ir, ig, ib, 0]; s01 = lut_sk[ir, ig, ib, 1]; s02 = lut_sk[ir, ig, ib, 2]
+                    sa0 = lut_sk[ir+ar, ig+ag, ib+ab, 0]; sa1 = lut_sk[ir+ar, ig+ag, ib+ab, 1]; sa2 = lut_sk[ir+ar, ig+ag, ib+ab, 2]
+                    sb0 = lut_sk[ir+br, ig+bg_, ib+bb, 0]; sb1 = lut_sk[ir+br, ig+bg_, ib+bb, 1]; sb2 = lut_sk[ir+br, ig+bg_, ib+bb, 2]
+                    s10 = lut_sk[ir+1, ig+1, ib+1, 0]; s11 = lut_sk[ir+1, ig+1, ib+1, 1]; s12 = lut_sk[ir+1, ig+1, ib+1, 2]
+                    acc0 += m*(w0*s00 + wa*sa0 + wb*sb0 + w1*s10 - acc0)
+                    acc1 += m*(w0*s01 + wa*sa1 + wb*sb1 + w1*s11 - acc1)
+                    acc2 += m*(w0*s02 + wa*sa2 + wb*sb2 + w1*s12 - acc2)
                 w00 = (1-wx)*(1-wy); w01 = wx*(1-wy); w10 = (1-wx)*wy; w11 = wx*wy
                 g0 = gain_q[y0, x0, 0]*w00 + gain_q[y0, x1, 0]*w01 + gain_q[y1, x0, 0]*w10 + gain_q[y1, x1, 0]*w11
                 g1 = gain_q[y0, x0, 1]*w00 + gain_q[y0, x1, 1]*w01 + gain_q[y1, x0, 1]*w10 + gain_q[y1, x1, 1]*w11

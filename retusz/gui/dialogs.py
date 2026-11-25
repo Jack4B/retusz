@@ -66,15 +66,15 @@ class ModelDialog(_Dialog):
 class SettingsDialog(_Dialog):
     """Ustawienia: Ogólne (podgląd, silnik, urządzenie, model) and Eksport (JPG, profil, DPI, rozmiar, wyostrzanie, metadane)."""
     def __init__(self, master, settings, on_save):
-        super().__init__(master, "Ustawienia", 560, 600); self.s = settings; self.on_save = on_save
+        super().__init__(master, "Ustawienia", 560, 660); self.s = settings; self.on_save = on_save
+        row_b = ctk.CTkFrame(self, fg_color=T.BG); row_b.pack(side="bottom", fill="x", padx=20, pady=(6, 14))
+        T.button(row_b, "Zapisz", self.save, accent=True).pack(side="right")
+        T.button(row_b, "Anuluj", self.destroy).pack(side="right", padx=8)
         tabs = ctk.CTkTabview(self, fg_color=T.BG, segmented_button_selected_color="#5A4120",
                               segmented_button_selected_hover_color="#6A4C24", segmented_button_fg_color=T.BTN,
                               segmented_button_unselected_color=T.BTN, text_color=T.TEXT)
         tabs.pack(fill="both", expand=True, padx=16, pady=(6, 0))
         self._general(tabs.add("Ogólne")); self._export(tabs.add("Eksport"))
-        row_b = ctk.CTkFrame(self, fg_color=T.BG); row_b.pack(fill="x", padx=20, pady=(6, 16))
-        T.button(row_b, "Zapisz", self.save, accent=True).pack(side="right")
-        T.button(row_b, "Anuluj", self.destroy).pack(side="right", padx=8)
 
     @staticmethod
     def _grid(tab):
@@ -82,8 +82,8 @@ class SettingsDialog(_Dialog):
         g.grid_columnconfigure(1, weight=1); return g
 
     @staticmethod
-    def _menu(g, values, current, row):
-        m = ctk.CTkOptionMenu(g, values=values, fg_color=T.BTN, button_color=T.BTN_HOVER, text_color=T.TEXT, width=230)
+    def _menu(g, values, current, row, command=None):
+        m = ctk.CTkOptionMenu(g, values=values, fg_color=T.BTN, button_color=T.BTN_HOVER, text_color=T.TEXT, width=230, command=command)
         m.set(current); m.grid(row=row, column=1, columnspan=2, sticky="w", pady=5); return m
 
     @staticmethod
@@ -133,13 +133,26 @@ class SettingsDialog(_Dialog):
         if o.suffix: self.suf.insert(0, o.suffix)
         self.suf.grid(row=r, column=1, sticky="w", pady=5); r += 1
         self._lbl(g, "Metadane", r); self.meta = self._menu(g, list(EX.METADATA.values()), EX.METADATA[o.metadata], r); r += 1
-        self._lbl(g, "Wyostrzanie", r); self.sh = self._menu(g, list(EX.SHARPEN.values()), EX.SHARPEN[o.sharpen], r); r += 1
+        self._lbl(g, "Wyostrzanie", r); self.sh = self._menu(g, list(EX.SHARPEN.values()), EX.SHARPEN[o.sharpen], r, command=lambda _: self._sync_sharpen_state()); r += 1
         f1 = lambda v: f"{float(v):.1f}"
         self.rad = self._slider(g, r, "  promień (px)", 0.3, 3.0, o.radius, f1); r += 1
         self.amt = self._slider(g, r, "  ilość", 0.0, 3.0, o.amount, f1); r += 1
         self.thr = self._slider(g, r, "  próg", 0.0, 10.0, o.threshold, f1); r += 1
         self.shs = self._slider(g, r, "  mniej na skórze", 0, 100, o.sharpen_skin*100, lambda v: f"{int(round(float(v)))}%"); r += 1
         T.label(g, "Ekran/Druk to gotowe ustawienia; suwaki działają dla »Własne«", 11, T.MUTED).grid(row=r, column=1, columnspan=2, sticky="w")
+        self._sync_sharpen_state()
+
+    def _sync_sharpen_state(self):
+        cur = self.sh.get()
+        custom = cur == EX.SHARPEN["custom"]
+        active = cur != EX.SHARPEN["off"]
+        for sl in (self.rad, self.amt, self.thr):
+            sl.configure(state="normal" if custom else "disabled",
+                         progress_color=T.ACCENT if custom else T.BORDER,
+                         button_color=T.ACCENT if custom else T.MUTED)
+        self.shs.configure(state="normal" if active else "disabled",
+                           progress_color=T.ACCENT if active else T.BORDER,
+                           button_color=T.ACCENT if active else T.MUTED)
 
     def _model_status(self):
         self.model_lbl.configure(text=("zainstalowany (119 MB)" if models.have_ai() else "nie pobrany · używany lekki model"))

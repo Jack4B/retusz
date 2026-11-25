@@ -165,3 +165,49 @@ def test_pipeline_uses_v2_with_landmarks(monkeypatch):
     rgb, info = portrait_scene(600, 400, seed=8)
     out = P._dodge_burn_region(rgb, np.ones((150, 100), np.float32), [info["face"]], 0.5, [info["lms"]])
     assert out is rgb and np.allclose(seen["lms"][0], info["lms"])
+
+
+def test_plastyka_3d_rejects_background_connected_to_subject():
+    """Task 2: a background patch the depth model reads as near and touching the head/torso must not be sculpted."""
+    from retusz.engine import relight as RL
+    for seed in (7, 9):
+        rgb, info = portrait_scene(900, 600, seed=seed)
+        mask = F.skin_mask(rgb, [info["face"]])
+        rl = RL.Relight(rgb, mask, [np.asarray(info["face"], np.float32)/600])
+        qh, qw = 225, 150
+        rgb_q = cv2.resize(rgb, (qw, qh), interpolation=cv2.INTER_AREA)
+        Lq = L_of(rgb_q)
+        g = rl.gain(qh, qw, Lq, 1.0, 120.0, rgb_q=rgb_q)
+        person = cv2.resize(info["person"], (qw, qh), interpolation=cv2.INTER_AREA)
+        bg_out = _ring(person, 0.04*qw, 10*qw)
+        fg_r = cv2.resize(rl.fg, (qw, qh), interpolation=cv2.INTER_LINEAR)
+        assert float(fg_r[bg_out].mean()) < 0.03, f"seed={seed}: background leaked into subject mask: {fg_r[bg_out].mean():.3f}"
+        near_out, far_out = _ring(person, 0, 0.03*qw), _ring(person, 0.06*qw, 0.12*qw)
+        assert abs(float(g[near_out].mean()) - float(g[far_out].mean())) < 0.015, (seed, g[near_out].mean(), g[far_out].mean())
+        assert abs(float(g[bg_out].mean())) < 0.01, (seed, g[bg_out].mean())
+        # Subject itself must still be kept intact
+        pm = cv2.erode((person > 0.8).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+        assert float(fg_r[pm].mean()) > 0.82, f"seed={seed}: subject lost: {fg_r[pm].mean():.3f}"
+
+
+def test_subject_mask_cuts_fused_background_lobe_by_colour():
+    """Stress test: even if the depth model places a large backdrop lobe at foreground depth touching the head,
+    colour-coherent GrabCut cuts it off cleanly along the person's boundary."""
+    from retusz.engine import relight as RL
+    rgb, info = portrait_scene(900, 600, seed=4)
+    h, w = 518, 345
+    person_s = cv2.resize(info["person"], (w, h), interpolation=cv2.INTER_AREA)
+    depth = np.where(person_s > 0.5, 0.82, 0.10).astype(np.float32)
+    # Artificially fuse a huge near-depth lobe on the right backdrop touching the head/shoulder
+    lobe = np.zeros((h, w), bool)
+    lobe[int(0.18*h):int(0.55*h), int(0.68*w):int(0.95*w)] = True
+    lobe &= person_s < 0.05
+    depth[lobe] = 0.66
+    skin = F.skin_mask(rgb, [info["face"]])
+    fg = RL.subject_mask(depth, skin, [np.asarray(info["face"], np.float32)/600], rgb=rgb)
+    assert lobe.sum() > 2000
+    assert float(fg[lobe].mean()) < 0.12, f"fused background lobe survived: {fg[lobe].mean():.3f}"
+    pm = cv2.erode((person_s > 0.8).astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
+    assert float(fg[pm].mean()) > 0.82, f"subject lost: {fg[pm].mean():.3f}"
+
+

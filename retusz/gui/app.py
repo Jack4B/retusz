@@ -20,15 +20,38 @@ from ..engine import render as R, color as C, device as DEV, modflows as MF, rel
 from ..engine import histo as HI, wb as WB, geometry as G
 
 ENGINE_LABEL = {"ai": "AI (B6)", "ai_light": "AI lekki (B0)", "classic": "bez AI (IDT)"}
-SLIDERS = [  # key, label, from, to, display  (4 equal columns, fixed-width value boxes: nothing re-flows while dragging)
-    ("strength", "Siła kolorów", 0, 100, "pct"), ("skin", "Skóra", 0, 100, "pct"), ("skin_even", "Równanie skóry", 0, 100, "pct"),
-    ("vignette", "Winieta", 0, 100, "pct"),
-    ("shadows", "Cienie", -100, 100, "num"), ("highlights", "Światła", -100, 100, "num"), ("saturation", "Nasycenie", -100, 100, "num"),
-    ("vibrance", "Jaskrawość", -100, 100, "num"),
-    ("wide", "Pełne barwy", 0, 100, "pct"), ("db", "Dodge&Burn", 0, 100, "pct"), ("plastic", "Plastyka 3D", 0, 100, "pct"),
-    ("temp", "Temperatura", -100, 100, "num"), ("tint", "Odcień", -100, 100, "num"),
-]
-SLIDER_CELLS = [(i//4, i % 4) for i in range(11)] + [(3, 0), (3, 1)]   # (2, 3) = light direction, (3, 2-3) = white balance
+SLIDER_TABS = ["Światło i Kolor", "Wzorzec i Portret"]
+SLIDER_GROUPS = {
+    SLIDER_TABS[0]: [  # (key, label, lo, hi, kind, row, col)
+        ("exposure", "Ekspozycja", -200, 200, "ev", 0, 0),
+        ("contrast", "Kontrast", -100, 100, "num", 0, 1),
+        ("highlights", "Światła", -100, 100, "num", 0, 2),
+        ("shadows", "Cienie", -100, 100, "num", 0, 3),
+        ("whites", "Biele", -100, 100, "num", 1, 0),
+        ("blacks", "Czernie", -100, 100, "num", 1, 1),
+        ("vibrance", "Jaskrawość", -100, 100, "num", 1, 2),
+        ("saturation", "Nasycenie", -100, 100, "num", 1, 3),
+        ("temp", "Temperatura", -100, 100, "num", 2, 0),
+        ("tint", "Odcień", -100, 100, "num", 2, 1),
+    ],
+    SLIDER_TABS[1]: [
+        ("strength", "Siła kolorów", 0, 100, "pct", 0, 0),
+        ("skin", "Skóra", 0, 100, "pct", 0, 1),
+        ("skin_even", "Równanie skóry", 0, 100, "pct", 0, 2),
+        ("vignette", "Winieta", 0, 100, "pct", 0, 3),
+        ("db", "Dodge&Burn", 0, 100, "pct", 1, 0),
+        ("plastic", "Plastyka 3D", 0, 100, "pct", 1, 1),
+        ("clarity", "Przejrzystość", -100, 100, "num", 1, 3),
+        ("wide", "Pełne barwy", 0, 100, "pct", 2, 0),
+    ],
+}
+_DEFAULTS = Params()
+_COPY_KEYS = (
+    "strength", "skin", "exposure", "contrast", "shadows", "highlights", "whites", "blacks",
+    "vignette", "db", "plastic", "clarity", "light_angle", "saturation", "vibrance",
+    "skin_even", "wide", "temp", "tint",
+)
+SLIDER_AREA_H = 166
 TOOLS = ["Pędzel D&B", "Kadr"]
 TOOL_W, TOOL_H = 268, 184
 PHOTO_TYPES = [("Zdjęcia i RAW", "*.jpg *.jpeg *.png *.tif *.tiff *.webp *.nef *.NEF *.nrw *.NRW")]
@@ -53,16 +76,24 @@ class RetuszApp(ctk.CTk):
         self._gen = {}; self._ui = queue.Queue(); self._jobs = queue.Queue(); self._save_after = None
         self._stroke = None
         self.frame = None; self.detail_raw = None; self.show_clip = False; self.picking = False
+        self.show_before = False; self._clipboard = None
+        self._undo: list[dict] = []; self._redo: list[dict] = []; self._hist_anchor = self.params.to_dict(); self._hist_after = None
         self.tool = "brush"; self.hline_on = False; self._hline = None; self._crop_drag = None; self._crop_live = None
         self._geo_after = None
         threading.Thread(target=self._worker, daemon=True).start()
         self._build(); self._poll()
         self.bind("<Left>", lambda e: self.step(-1)); self.bind("<Right>", lambda e: self.step(1))
-        self.bind("<Control-s>", lambda e: self.save_current()); self.bind("<Control-z>", lambda e: self.undo_stroke())
+        self.bind("<Control-s>", lambda e: self.save_current())
+        self.bind("<Control-z>", lambda e: self._key(self.undo))
+        self.bind("<Control-y>", lambda e: self._key(self.redo))
+        self.bind("<Control-Shift-Z>", lambda e: self._key(self.redo))
+        self.bind("<Control-Shift-C>", lambda e: self._key(self.copy_params))
+        self.bind("<Control-Shift-V>", lambda e: self._key(self.paste_params))
+        self.bind("<backslash>", lambda e: self._key(self.toggle_before))
         self.bind("<KeyPress-space>", lambda e: self._space_key(True)); self.bind("<KeyRelease-space>", lambda e: self._space_key(False))
         self.bind("<bracketleft>", lambda e: self._brush_step(-1)); self.bind("<bracketright>", lambda e: self._brush_step(1))
         self.bind("<Control-0>", lambda e: self.zoom_fit()); self.bind("<Control-1>", lambda e: self.zoom_100())
-        for k, fn in (("w", self.toggle_pick), ("c", self.toggle_crop_tool), ("j", self.toggle_clip)):
+        for k, fn in (("w", self.toggle_pick), ("c", self.toggle_crop_tool), ("j", self.toggle_clip), ("m", self.toggle_mask)):
             self.bind(f"<KeyPress-{k}>", lambda e, fn=fn: self._key(fn)); self.bind(f"<KeyPress-{k.upper()}>", lambda e, fn=fn: self._key(fn))
         self.bind("<Return>", lambda e: self._key(self._crop_done)); self.bind("<Escape>", lambda e: self._key(self._escape))
         self.submit(lambda: (R.warmup(), None)[1], None)
@@ -79,10 +110,12 @@ class RetuszApp(ctk.CTk):
         T.button(top, "Porównaj", self.show_compare).pack(side="left", padx=8)
         T.button(top, "Ustawienia", self.open_settings).pack(side="left")
         T.button(top, "Grading z AI", self.open_transfer, width=120).pack(side="left", padx=(8, 0))
-        zb = ctk.CTkFrame(top, fg_color=T.BG); zb.pack(side="left", padx=(22, 0))
-        T.button(zb, "Dopasuj", self.zoom_fit, width=78).pack(side="left")
-        T.button(zb, "100%", self.zoom_100, width=58).pack(side="left", padx=6)
-        zbox = ctk.CTkFrame(zb, fg_color=T.BG, width=64, height=30); zbox.pack(side="left"); zbox.pack_propagate(False)
+        zb = ctk.CTkFrame(top, fg_color=T.BG); zb.pack(side="left", padx=(18, 0))
+        T.button(zb, "Dopasuj", self.zoom_fit, width=74).pack(side="left")
+        T.button(zb, "100%", self.zoom_100, width=54).pack(side="left", padx=6)
+        self.before_btn = T.button(zb, "Przed/Po", self.toggle_before, width=84)
+        self.before_btn.pack(side="left", padx=(0, 6))
+        zbox = ctk.CTkFrame(zb, fg_color=T.BG, width=56, height=30); zbox.pack(side="left"); zbox.pack_propagate(False)
         self.zoom_lbl = T.label(zbox, "", 12, T.MUTED, anchor="w"); self.zoom_lbl.pack(fill="both", expand=True)
         T.button(top, "Eksportuj serię", self.export_series, accent=True, width=140).pack(side="right")
         T.button(top, "Zapisz", self.save_current, accent=True).pack(side="right", padx=8)
@@ -99,8 +132,11 @@ class RetuszApp(ctk.CTk):
         imgs = ctk.CTkFrame(body, fg_color=T.BG); imgs.pack(fill="both", expand=True)
         for c in range(3): imgs.grid_columnconfigure(c, weight=1, uniform="v")
         imgs.grid_rowconfigure(1, weight=1)
+        self.res_hdr = None
         for c, t in enumerate(["Źródło", "Wynik", "Wzorzec"]):
-            T.label(imgs, t, 14).grid(row=0, column=c, sticky="w", padx=4, pady=(0, 4))
+            lbl = T.label(imgs, t, 14)
+            lbl.grid(row=0, column=c, sticky="w", padx=4, pady=(0, 4))
+            if c == 1: self.res_hdr = lbl
         self.view_src = ImageView(imgs, "Otwórz zdjęcie lub folder")
         self.view_res = ImageView(imgs, "Tu pojawi się wynik")
         self.view_ref = ImageView(imgs, "Wybierz wzorzec,\nnp. zdjęcie obrobione w PS")
@@ -121,34 +157,61 @@ class RetuszApp(ctk.CTk):
         ctl = ctk.CTkFrame(body, fg_color=T.CARD, corner_radius=10, border_width=1, border_color=T.BORDER)
         ctl.pack(fill="x", pady=(12, 0))
         sl = ctk.CTkFrame(ctl, fg_color=T.CARD)
-        for c in range(4): sl.grid_columnconfigure(c, weight=1, uniform="sl")
+        hdr = ctk.CTkFrame(sl, fg_color=T.CARD); hdr.pack(fill="x", padx=6, pady=(0, 6))
+        self.slider_tabs = T.segmented(hdr, SLIDER_TABS, command=self._slider_tab)
+        self.slider_tabs.set(SLIDER_TABS[0]); self.slider_tabs.pack(side="left")
+        act = ctk.CTkFrame(hdr, fg_color=T.CARD); act.pack(side="right")
+        def sbtn(text, cmd, w):
+            b = T.button(act, text, cmd, width=w); b.configure(height=28, font=T.font(12)); b.pack(side="left", padx=(4, 0)); return b
+        self.undo_btn = sbtn("Cofnij", self.undo, 62)
+        self.redo_btn = sbtn("Ponów", self.redo, 62)
+        sbtn("Kopiuj", self.copy_params, 62)
+        self.paste_btn = sbtn("Wklej", self.paste_params, 58)
+        sbtn("Zeruj", self.reset_adjustments, 58)
+
+        sl_area = ctk.CTkFrame(sl, fg_color=T.CARD, height=SLIDER_AREA_H)
+        sl_area.pack(fill="x", expand=True); sl_area.pack_propagate(False)
+        self.slider_frames = {}
         self.sliders = {}
         def value_box(parent, width):
             box = ctk.CTkFrame(parent, fg_color=T.CARD, width=width, height=22); box.pack_propagate(False)
-            lab = T.label(box, "", 13, T.MUTED, anchor="e"); lab.pack(fill="both", expand=True); return box, lab
-        for i, (key, text, lo, hi, kind) in enumerate(SLIDERS):
-            r_, c_ = SLIDER_CELLS[i]
-            cell = ctk.CTkFrame(sl, fg_color=T.CARD); cell.grid(row=r_, column=c_, sticky="ew", padx=6, pady=3)
-            cell.grid_columnconfigure(0, weight=1)
-            T.label(cell, text, 13, anchor="w").grid(row=0, column=0, sticky="w")
-            box, val = value_box(cell, 46); box.grid(row=1, column=1, padx=(6, 0))
-            s = T.slider(cell, lo, hi, number_of_steps=hi-lo, width=60, command=lambda v, k=key: self._slider(k, v))
-            s.grid(row=1, column=0, sticky="ew")
-            self.sliders[key] = (s, val, kind)
-        cell = ctk.CTkFrame(sl, fg_color=T.CARD); cell.grid(row=2, column=3, sticky="ew", padx=6, pady=3)
-        cell.grid_columnconfigure(0, weight=1)
-        T.label(cell, "Światło 3D", 13, anchor="w").grid(row=0, column=0, sticky="w")
-        self.light_auto = ctk.CTkSwitch(cell, text="Auto", progress_color=T.ACCENT, text_color=T.TEXT, width=60,
-                                        switch_width=30, switch_height=14, font=T.font(11), command=self._light_auto)
-        self.light_auto.grid(row=0, column=1, sticky="e")
-        box, self.light_val = value_box(cell, 62); box.grid(row=1, column=1, padx=(6, 0))
-        self.light = T.slider(cell, 0, 355, number_of_steps=71, width=60, command=self._light); self.light.grid(row=1, column=0, sticky="ew")
-        wbc = ctk.CTkFrame(sl, fg_color=T.CARD); wbc.grid(row=3, column=2, columnspan=2, sticky="ew", padx=6, pady=3)
+            lab = T.label(box, "", 12, T.MUTED, anchor="e"); lab.pack(fill="both", expand=True); return box, lab
+        for tname in SLIDER_TABS:
+            f = ctk.CTkFrame(sl_area, fg_color=T.CARD)
+            f.place(x=0, y=0, relwidth=1, relheight=1)
+            for c in range(4): f.grid_columnconfigure(c, weight=1, uniform=f"sl_{tname}")
+            self.slider_frames[tname] = f
+            for key, text, lo, hi, kind, r_, c_ in SLIDER_GROUPS[tname]:
+                cell = ctk.CTkFrame(f, fg_color=T.CARD); cell.grid(row=r_, column=c_, sticky="ew", padx=6, pady=3)
+                cell.grid_columnconfigure(0, weight=1)
+                lbl = T.label(cell, text, 13, anchor="w"); lbl.grid(row=0, column=0, columnspan=2, sticky="w")
+                box, val = value_box(cell, 58 if kind == "ev" else 44); box.grid(row=1, column=1, padx=(6, 0))
+                s = T.slider(cell, lo, hi, number_of_steps=hi-lo, width=60, command=lambda v, k=key: self._slider(k, v))
+                s.grid(row=1, column=0, sticky="ew")
+                for w_ in (lbl, val, s):
+                    w_.bind("<Double-Button-1>", lambda e, k=key: self._reset_slider(k))
+                self.sliders[key] = (s, val, kind)
+        # Tab 0: White Balance bar in row 2, cols 2-3
+        f0 = self.slider_frames[SLIDER_TABS[0]]
+        wbc = ctk.CTkFrame(f0, fg_color=T.CARD); wbc.grid(row=2, column=2, columnspan=2, sticky="ew", padx=6, pady=3)
         T.label(wbc, "Balans bieli", 13, anchor="w").grid(row=0, column=0, columnspan=3, sticky="w")
         self.pick_btn = T.button(wbc, "Pipeta (W)", self.toggle_pick, width=104); self.pick_btn.configure(height=26)
         self.pick_btn.grid(row=1, column=0, sticky="w")
         b = T.button(wbc, "Balans → seria", self.sync_wb, width=118); b.configure(height=26); b.grid(row=1, column=1, sticky="w", padx=(6, 0))
         b = T.button(wbc, "Zeruj", self.reset_wb, width=56); b.configure(height=26); b.grid(row=1, column=2, sticky="w", padx=(6, 0))
+        # Tab 1: 3D Light direction in row 1, col 2 + shortcut hint in row 2, cols 1-3
+        f1 = self.slider_frames[SLIDER_TABS[1]]
+        cell = ctk.CTkFrame(f1, fg_color=T.CARD); cell.grid(row=1, column=2, sticky="ew", padx=6, pady=3)
+        cell.grid_columnconfigure(0, weight=1)
+        T.label(cell, "Światło 3D", 13, anchor="w").grid(row=0, column=0, sticky="w")
+        self.light_auto = ctk.CTkSwitch(cell, text="Auto", progress_color=T.ACCENT, text_color=T.TEXT, width=60,
+                                        switch_width=30, switch_height=14, font=T.font(11), command=self._light_auto)
+        self.light_auto.grid(row=0, column=1, sticky="e")
+        box, self.light_val = value_box(cell, 58); box.grid(row=1, column=1, padx=(6, 0))
+        self.light = T.slider(cell, 0, 355, number_of_steps=71, width=60, command=self._light); self.light.grid(row=1, column=0, sticky="ew")
+        hint = T.label(f1, "Dwuklik na suwaku: reset  ·  \\ : Przed/Po  ·  M: maska skóry  ·  Ctrl+Z/Y: cofnij/ponów", 11, T.MUTED, anchor="w")
+        hint.grid(row=2, column=1, columnspan=3, sticky="sw", padx=6, pady=(14, 3))
+        f0.lift()
 
         tools = ctk.CTkFrame(ctl, fg_color=T.CARD)
         self.tool_tabs = T.segmented(tools, TOOLS, command=self._tool_tab); self.tool_tabs.set(TOOLS[0]); self.tool_tabs.pack(fill="x")
@@ -356,6 +419,7 @@ class RetuszApp(ctk.CTk):
 
     def select(self, i):
         self.idx = i; p = self.photos[i]; self.params = self.series.params_for(p)
+        self._reset_history(); self.show_before = False; self._style_before()
         self._load_params_into_ui(self.params); self._refresh_strip_marks(); self.fit = None
         self.result = None; self.frame = None; self.detail_raw = None; self.full_cache = None
         self.view_res.set_image(None, keep_view=False); self._set_status(f"Wczytuję {p.name}…")
@@ -396,16 +460,41 @@ class RetuszApp(ctk.CTk):
         if self.result is None: return
         a = self.params.angle
         self.frame = G.apply(self.result, a, None, interp=cv2.INTER_CUBIC) if a else self.result
-        img = self.frame
-        if self.settings.show_mask and self.mask_prev is not None:
-            m = cv2.resize(self.mask_prev, (self.result.shape[1], self.result.shape[0]))
-            if a: m = G.apply(m, a, None, interp=cv2.INTER_LINEAR)
-            m = m[..., None]; img = (img*(1-0.45*m) + np.array([245, 163, 59])*0.45*m).astype(np.uint8)
+        if self.show_before and self.src_prev is not None:
+            img = G.apply(self.src_prev, a, None, interp=cv2.INTER_CUBIC) if a else self.src_prev
+        else:
+            img = self.frame
+            if self.settings.show_mask and self.mask_prev is not None:
+                m = cv2.resize(self.mask_prev, (self.result.shape[1], self.result.shape[0]))
+                if a: m = G.apply(m, a, None, interp=cv2.INTER_LINEAR)
+                m = m[..., None]; img = (img*(1-0.45*m) + np.array([245, 163, 59])*0.45*m).astype(np.uint8)
         self.view_res.set_image(self._decorate(img), icc=self.src_icc, full_wh=self.src_size)
-        if self.detail_raw is not None: self.view_res.detail = self._decorate(self.detail_raw); self.view_res.redraw()
+        if self.show_before and self.full_cache is not None and self.idx >= 0 and self.full_cache[0] == self.photos[self.idx]:
+            det = G.apply(self.full_cache[1], a, None, interp=cv2.INTER_LINEAR) if a else self.full_cache[1]
+            self.view_res.detail = self._decorate(det); self.view_res.redraw()
+        elif self.detail_raw is not None:
+            self.view_res.detail = self._decorate(self.detail_raw); self.view_res.redraw()
         if self.view_res.zoom != self.view_src.zoom or self.view_res.center != self.view_src.center:
             self.view_res.set_view(self.view_src.zoom, self.view_src.center)
         self._sync_zoom_label(); self._update_hist()
+
+    def _style_before(self):
+        if hasattr(self, "before_btn"):
+            self.before_btn.configure(border_color=T.ACCENT if self.show_before else T.BORDER,
+                                      text_color=T.ACCENT if self.show_before else T.TEXT)
+        if getattr(self, "res_hdr", None) is not None:
+            self.res_hdr.configure(text="Wynik (Oryginał)" if self.show_before else "Wynik",
+                                   text_color=T.ACCENT if self.show_before else T.TEXT)
+
+    def toggle_before(self, on=None):
+        if self.result is None: return
+        self.show_before = (not self.show_before) if on is None else bool(on)
+        self._style_before(); self.redraw_result()
+
+    def toggle_mask(self, on=None):
+        self.settings.show_mask = (not self.settings.show_mask) if on is None else bool(on)
+        self.redraw_result()
+        self._set_status("Podgląd maski skóry: " + ("włączony (M)." if self.settings.show_mask else "wyłączony."))
 
     def _decorate(self, img):
         """Clipping overlay + crop dimming for display (the export never sees this)."""
@@ -451,10 +540,12 @@ class RetuszApp(ctk.CTk):
         self._set_status("Balans bieli ustawiony z pipety" + (" (poza zakresem suwaków – przycięty)." if cut else "."))
 
     def _set_wb(self, t, ti):
+        self._commit_history()
         self.params.temp, self.params.tint = t, ti
         for k in ("temp", "tint"):
-            s_, val, kind = self.sliders[k]; v = getattr(self.params, k)*100; s_.set(v); val.configure(text=self._fmt(v, kind))
-        self._changed()
+            s_, val, kind = self.sliders[k]; pv = getattr(self.params, k); v = pv*100; s_.set(v)
+            val.configure(text=self._fmt(v, kind), text_color=self._val_color(k, pv))
+        self._changed(discrete=True)
 
     def reset_wb(self):
         self._set_wb(0.0, 0.0)
@@ -612,13 +703,20 @@ class RetuszApp(ctk.CTk):
         if self._hline: v.create_line(*self._hline, fill=T.ACCENT, width=2, dash=(6, 3), tags="crop")
 
     # ================= controls =================
+    def _slider_tab(self, name):
+        self.slider_frames[name].lift()
+
+    def _val_color(self, key, param_val):
+        return T.TEXT if abs(param_val - getattr(_DEFAULTS, key)) > 1e-3 else T.MUTED
+
     def _load_params_into_ui(self, p: Params):
         for key, (s, val, kind) in self.sliders.items():
-            v = getattr(p, key)*100; s.set(v); val.configure(text=self._fmt(v, kind))
+            pv = getattr(p, key); v = pv*100; s.set(v)
+            val.configure(text=self._fmt(v, kind), text_color=self._val_color(key, pv))
         if p.light_angle is None: self.light_auto.select()
         else: self.light_auto.deselect(); self.light.set(p.light_angle)
         self._show_light(); self._crop_ui_sync()
-        self._update_override_label()
+        self._update_override_label(); self._update_history_btns()
 
     def _auto_angle(self):
         r = self.fit.relight if self.fit is not None and self.fit.relight is not None else None
@@ -633,7 +731,7 @@ class RetuszApp(ctk.CTk):
         auto = self.params.light_angle is None
         a = self._auto_angle() if auto else self.params.light_angle
         if auto: self.light.set(a)
-        self.light_val.configure(text=f"{int(a)}° {self._dir_name(a)}")
+        self.light_val.configure(text=f"{int(a)}° {self._dir_name(a)}", text_color=T.MUTED if auto else T.TEXT)
         self.light.configure(state="disabled" if auto else "normal")
 
     def _light(self, v):
@@ -641,22 +739,114 @@ class RetuszApp(ctk.CTk):
         self.params.light_angle = float(v); self._show_light(); self._changed()
 
     def _light_auto(self):
+        self._commit_history()
         self.params.light_angle = None if self.light_auto.get() else float(self.light.get())
-        self._show_light(); self._changed()
+        self._show_light(); self._changed(discrete=True)
 
     @staticmethod
     def _fmt(v, kind):
+        if kind == "ev":
+            return f"{v/100:+.2f} EV".replace(".", ",") if round(v) else "0,00 EV"
         return f"{int(round(v))}%" if kind == "pct" else f"{int(round(v)):+d}" if round(v) else "0"
 
     def _slider(self, key, v):
-        s, val, kind = self.sliders[key]; val.configure(text=self._fmt(v, kind))
-        setattr(self.params, key, float(v)/100); self._changed()
+        s, val, kind = self.sliders[key]; pv = float(v)/100
+        val.configure(text=self._fmt(v, kind), text_color=self._val_color(key, pv))
+        setattr(self.params, key, pv); self._changed()
 
-    def _changed(self, render=True):
+    def _reset_slider(self, key):
+        dv = getattr(_DEFAULTS, key)
+        if abs(getattr(self.params, key) - dv) <= 1e-4: return
+        self._commit_history()
+        setattr(self.params, key, dv)
+        s, val, kind = self.sliders[key]; v = dv*100; s.set(v)
+        val.configure(text=self._fmt(v, kind), text_color=T.MUTED)
+        self._changed(discrete=True)
+
+    # ================= undo / redo / copy / paste =================
+    def _reset_history(self):
+        if self._hist_after: self.after_cancel(self._hist_after); self._hist_after = None
+        self._undo = []; self._redo = []; self._hist_anchor = self.params.to_dict()
+        self._update_history_btns()
+
+    def _commit_history(self):
+        if self._hist_after: self.after_cancel(self._hist_after); self._hist_after = None
+        cur = self.params.to_dict()
+        if self._hist_anchor is not None and cur != self._hist_anchor:
+            self._undo.append(self._hist_anchor)
+            if len(self._undo) > 50: self._undo.pop(0)
+            self._redo.clear()
+            self._hist_anchor = cur
+        self._update_history_btns()
+
+    def _update_history_btns(self):
+        if not hasattr(self, "undo_btn"): return
+        can_u = bool(self._undo) or (self._hist_anchor is not None and self.params.to_dict() != self._hist_anchor)
+        self.undo_btn.configure(state="normal" if can_u else "disabled", text_color=T.TEXT if can_u else T.MUTED)
+        self.redo_btn.configure(state="normal" if self._redo else "disabled", text_color=T.TEXT if self._redo else T.MUTED)
+        self.paste_btn.configure(state="normal" if self._clipboard else "disabled", text_color=T.TEXT if self._clipboard else T.MUTED)
+
+    def undo(self):
+        if self._hist_after: self.after_cancel(self._hist_after); self._hist_after = None
+        cur = self.params.to_dict()
+        if self._hist_anchor is not None and cur != self._hist_anchor:
+            prev = self._hist_anchor
+        elif self._undo:
+            prev = self._undo.pop()
+        else:
+            return
+        self._redo.append(cur)
+        self.params = Params.from_dict(prev); self._hist_anchor = self.params.to_dict()
+        self.detail_raw = None; self.view_res.detail = None
+        self._load_params_into_ui(self.params); self._persist_override(); self.request_render()
+        self._set_status("Cofnięto zmianę.")
+
+    def redo(self):
+        if not self._redo: return
+        if self._hist_after: self.after_cancel(self._hist_after); self._hist_after = None
+        self._undo.append(self.params.to_dict())
+        nxt = self._redo.pop()
+        self.params = Params.from_dict(nxt); self._hist_anchor = self.params.to_dict()
+        self.detail_raw = None; self.view_res.detail = None
+        self._load_params_into_ui(self.params); self._persist_override(); self.request_render()
+        self._set_status("Ponowiono zmianę.")
+
+    def copy_params(self):
+        d = self.params.to_dict()
+        self._clipboard = {k: d[k] for k in _COPY_KEYS}
+        self._update_history_btns()
+        self._set_status("Skopiowano ustawienia zdjęcia (Ctrl+Shift+V, aby wkleić).")
+
+    def paste_params(self):
+        if not self._clipboard: return
+        self._commit_history()
+        merged = {**self.params.to_dict(), **self._clipboard}
+        self.params = Params.from_dict(merged)
+        self._load_params_into_ui(self.params); self._changed(discrete=True)
+        self._set_status("Wklejono ustawienia do bieżącego zdjęcia.")
+
+    def reset_adjustments(self):
+        self._commit_history()
+        d = _DEFAULTS.to_dict()
+        keep = {k: getattr(self.params, k) for k in ("strokes", "angle", "crop", "aspect")}
+        self.params = Params.from_dict({**d, **keep})
+        self._load_params_into_ui(self.params); self._changed(discrete=True)
+        self._set_status("Wyzerowano suwaki bieżącego zdjęcia (Ctrl+Z, aby cofnąć).")
+
+    def _persist_override(self):
         if self.series and self.idx >= 0:
             if self._save_after: self.after_cancel(self._save_after)
             p, ph = Params.from_dict(self.params.to_dict()), self.photos[self.idx]
             self._save_after = self.after(300, lambda: (self.series.set_override(ph, p), self._refresh_strip_marks(), self._update_override_label()))
+
+    def _changed(self, render=True, discrete=False):
+        if discrete:
+            self._commit_history()
+        else:
+            if self._hist_after: self.after_cancel(self._hist_after)
+            self._hist_after = self.after(450, self._commit_history)
+            self._update_history_btns()
+        self._persist_override()
         if render: self.request_render()
 
     def _update_override_label(self):
@@ -666,8 +856,10 @@ class RetuszApp(ctk.CTk):
 
     def reset_to_series(self):
         if not self.series or self.idx < 0: return
+        self._commit_history()
         if self._save_after: self.after_cancel(self._save_after); self._save_after = None
         self.series.clear_override(self.photos[self.idx]); self.params = self.series.params_for(self.photos[self.idx])
+        self._commit_history()
         self._load_params_into_ui(self.params); self._refresh_strip_marks(); self.request_render()
 
     def make_series_default(self):
@@ -740,17 +932,18 @@ class RetuszApp(ctk.CTk):
         self._stroke = None
         self.view_res.delete("stroke")
         W = W*G.straighten_scale(W, H, a)                        # brush size in source pixels
+        self._commit_history()
         self.params.strokes.append({"mode": "dodge" if self.brush_mode.get() == "Rozjaśnij" else "burn",
                                     "size": round(self._brush_px()/W, 5), "strength": round(self.brush_str.get()/100, 3),
                                     "softness": round(self.brush_soft.get()/100, 3),
                                     "points": pts[::max(1, len(pts)//300)]})
-        self._changed()
+        self._changed(discrete=True)
 
     def undo_stroke(self):
-        if self.params.strokes: self.params.strokes.pop(); self._changed()
+        if self.params.strokes: self._commit_history(); self.params.strokes.pop(); self._changed(discrete=True)
 
     def clear_strokes(self):
-        if self.params.strokes: self.params.strokes = []; self._changed()
+        if self.params.strokes: self._commit_history(); self.params.strokes = []; self._changed(discrete=True)
 
     # ================= zoom / pan =================
     def _space_key(self, down):
