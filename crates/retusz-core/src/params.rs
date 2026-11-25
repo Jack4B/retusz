@@ -23,6 +23,10 @@ pub struct Params {
     #[serde(default)]
     pub skin_even: f32,
     #[serde(default)]
+    pub skin_cast: f32,      //  0.0 .. +1.0 ('Czysta skóra' OKLCh cast reduction)
+    #[serde(default)]
+    pub skin_hue: f32,       // -1.0 .. +1.0 ('Odcień skóry' OKLCh hue rotation)
+    #[serde(default)]
     pub exposure: f32,       // -2.0 .. +2.0 EV
     #[serde(default)]
     pub contrast: f32,       // -1.0 .. +1.0
@@ -68,6 +72,8 @@ impl Default for Params {
             strength: 1.0,
             skin: 1.0,
             skin_even: 0.0,
+            skin_cast: 0.0,
+            skin_hue: 0.0,
             exposure: 0.0,
             contrast: 0.0,
             highlights: 0.0,

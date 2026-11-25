@@ -1,7 +1,7 @@
-"""Headless batch: python -m retusz cli <folder|photo> --reference ref.jpg [--out DIR] [--quality 95]"""
+"""Headless batch: python -m retusz cli <folder|photo> [--reference ref.jpg] [--colorchecker chart.jpg] [--preset NAME] [--out DIR] [--quality 95]"""
 import argparse, sys, time
 from pathlib import Path
-from . import imageio, models, batch, export
+from . import imageio, models, batch, export, presets as PR
 from .reference import Reference
 from .engine.pipeline import Engine
 from .sidecar import Series
@@ -15,20 +15,31 @@ def _utf8_console():
 def main(argv=None):
     _utf8_console()
     ap = argparse.ArgumentParser(prog="retusz cli")
-    ap.add_argument("path"); ap.add_argument("--reference", "-r", required=True)
+    ap.add_argument("path")
+    ap.add_argument("--reference", "-r", default=None, help="zdjęcie wzorcowe (opcjonalne)")
+    ap.add_argument("--colorchecker", "-c", default=None, help="zdjęcie z tablicą ColorChecker 24 do kalibracji serii")
+    ap.add_argument("--preset", "-p", default=None, help="nazwa presetu do nałożenia na serię")
     ap.add_argument("--out"); ap.add_argument("--quality", type=int, default=95)
     ap.add_argument("--method", choices=list(models.METHODS), default="ai")
     ap.add_argument("--long-edge", type=int, default=0); ap.add_argument("--suffix", default="")
     ap.add_argument("--profile", choices=list(export.CM.OUTPUT_PROFILES), default="keep")
     ap.add_argument("--sharpen", choices=list(export.SHARPEN), default="screen")
     a = ap.parse_args(argv)
-    path, ref_p = Path(a.path), Path(a.reference)
+    path = Path(a.path)
+    ref_p = Path(a.colorchecker) if a.colorchecker else (Path(a.reference) if a.reference else None)
+    is_cc = bool(a.colorchecker)
     folder = path if path.is_dir() else path.parent
-    photos = [p for p in imageio.list_images(folder) if p.resolve() != ref_p.resolve()] if path.is_dir() else [path]
+    photos = [p for p in imageio.list_images(folder) if (ref_p is None or p.resolve() != ref_p.resolve() or is_cc)] if path.is_dir() else [path]
     series = Series(folder)
+    if a.preset:
+        pr = next((x for x in PR.list_presets() if x.name.lower() == a.preset.lower()), None)
+        if pr is None:
+            print(f"BŁĄD: Nieznany preset '{a.preset}'. Dostępne: {', '.join(x.name for x in PR.list_presets())}")
+            return 1
+        series.params = pr.apply_to(series.params)
     mp, eff = models.resolve(a.method); eng = Engine(mp, eff)
     print(f"Silnik: {eff} · {eng.device()} · {len(photos)} zdjęć")
-    ref = Reference(ref_p)
+    ref = Reference(ref_p, colorchecker=is_cc) if ref_p is not None else None
     out = Path(a.out) if a.out else folder / "Retusz"; t = time.perf_counter()
     opts = export.ExportOptions(quality=a.quality, long_edge=a.long_edge, profile=a.profile, sharpen=a.sharpen, suffix=a.suffix)
     res = batch.export_series(eng, ref, series, photos, out, opts,

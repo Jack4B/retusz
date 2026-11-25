@@ -8,7 +8,9 @@ use crate::dnb::{dodge_burn_v2, skin_mask, FaceBox};
 use crate::geometry::clamp_crop;
 use crate::params::Params;
 use crate::relight::{relight_gain, subject_mask};
-use crate::tone::{apply_color_oklab, apply_exposure_lin, apply_tone_lin, clarity_gain};
+use crate::tone::{
+    apply_color_oklab, apply_exposure_lin, apply_skin_oklch, apply_tone_lin, clarity_gain,
+};
 use crate::wb::apply_bradford01;
 use rayon::prelude::*;
 
@@ -52,7 +54,7 @@ impl ReferenceStats {
 }
 
 /// Build the 33^3 3D LUT encoding white balance (Bradford CAT), optional reference match,
-/// exposure EV, OKLab contrast/highlights/shadows/whites/blacks, and OKLab vibrance/saturation.
+/// exposure EV, OKLab contrast/highlights/shadows/whites/blacks, OKLCh skin cast/hue, and OKLab vibrance/saturation.
 pub fn build_studio_lut(
     params: &Params,
     src_stats: Option<ReferenceStats>,
@@ -87,7 +89,7 @@ pub fn build_studio_lut(
         // 2. CIE/ICC Bradford Chromatic Adaptation white balance
         s = apply_bradford01(s, params.temp, params.tint);
 
-        // 3. Linear-light Exposure (EV) + OKLab tone curve + OKLab vibrance/saturation
+        // 3. Linear-light Exposure (EV) + OKLab tone curve + OKLCh skin locus + OKLab vibrance/saturation
         let mut lin = srgb_to_lin(s);
         lin = apply_exposure_lin(lin, params.exposure);
         lin = apply_tone_lin(
@@ -98,6 +100,9 @@ pub fn build_studio_lut(
             params.whites,
             params.blacks,
         );
+        if params.skin_cast.abs() > 1e-5 || params.skin_hue.abs() > 1e-5 {
+            lin = apply_skin_oklch(lin, params.skin_cast, params.skin_hue);
+        }
         let vib = params.vibrance + 0.25 * params.wide;
         let sat = params.saturation + 0.12 * params.wide;
         lin = apply_color_oklab(lin, sat, vib);

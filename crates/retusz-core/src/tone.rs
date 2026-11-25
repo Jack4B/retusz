@@ -185,6 +185,25 @@ pub fn apply_color_oklab(lin: [f32; 3], saturation: f32, vibrance: f32) -> [f32;
     oklab_to_lin_gamut(lab)
 }
 
+/// OKLCh skin-locus cast reduction (`skin_cast` in `0.0..1.0`) and skin hue control (`skin_hue` in `-1.0..1.0`).
+#[inline]
+pub fn apply_skin_oklch(lin: [f32; 3], skin_cast: f32, skin_hue: f32) -> [f32; 3] {
+    if skin_cast.abs() < 1e-6 && skin_hue.abs() < 1e-6 {
+        return lin;
+    }
+    let ok = lin_to_oklab(lin);
+    let (l, a, b) = (ok[0], ok[1], ok[2]);
+    let c = a.hypot(b);
+    let h = b.atan2(a);
+    let h_target = 50.0f32.to_radians();
+    let dh = (h - h_target).sin().atan2((h - h_target).cos());
+    let w_locus = (-(dh / 1.15).powi(4)).exp() * (c / 0.015).clamp(0.0, 1.0);
+    let h_new = h - skin_cast * 0.88 * w_locus * dh + skin_hue * 0.16 * w_locus;
+    let c_excess = (c - 0.11).max(0.0);
+    let c_new = c - skin_cast.max(0.0) * 0.35 * w_locus * c_excess;
+    oklab_to_lin_gamut([l, c_new * h_new.cos(), c_new * h_new.sin()])
+}
+
 /// Halo-free mid-tone local contrast (Clarity, `-1.0..+1.0`) via Guided Filter on CIELAB `L*`.
 /// Returns a relative luminance gain map `g` (`w * h`) for linear light: `L_lin_out = L_lin * (1 + g)`.
 pub fn clarity_gain(rgb8: &[u8], w: usize, h: usize, skin_mask: Option<&[f32]>, clarity: f32) -> Vec<f32> {

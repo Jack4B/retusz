@@ -17,7 +17,7 @@ from ..settings import Settings
 from ..sidecar import Series
 from ..engine.pipeline import Engine, Params
 from ..engine import render as R, color as C, device as DEV, modflows as MF, relight as RL
-from ..engine import histo as HI, wb as WB, geometry as G
+from ..engine import histo as HI, wb as WB, geometry as G, colorchecker as CC
 
 ENGINE_LABEL = {"ai": "AI (B6)", "ai_light": "AI lekki (B0)", "classic": "bez AI (IDT)"}
 CANVAS_MODES = ["Wynik", "Przed | Po", "Z wzorcem"]
@@ -40,8 +40,10 @@ SLIDER_GROUPS = {
         ("plastic", "Plastyka 3D", 0, 100, "pct", 0, 1),
         ("clarity", "Przejrzystość", -100, 100, "num", 0, 3),
         ("skin_even", "Równanie skóry", 0, 100, "pct", 1, 0),
-        ("vignette", "Winieta", 0, 100, "pct", 1, 1),
-        ("wide", "Pełne barwy", 0, 100, "pct", 1, 2),
+        ("skin_cast", "Czysta skóra", 0, 100, "pct", 1, 1),
+        ("skin_hue", "Odcień skóry", -100, 100, "num", 1, 2),
+        ("vignette", "Winieta", 0, 100, "pct", 2, 0),
+        ("wide", "Pełne barwy", 0, 100, "pct", 2, 1),
     ],
     SLIDER_TABS[2]: [
         ("strength", "Siła kolorów", 0, 100, "pct", 0, 0),
@@ -59,7 +61,7 @@ _DEFAULTS = Params()
 _COPY_KEYS = (
     "strength", "skin", "exposure", "contrast", "shadows", "highlights", "whites", "blacks",
     "vignette", "db", "plastic", "clarity", "light_angle", "saturation", "vibrance",
-    "skin_even", "wide", "temp", "tint",
+    "skin_even", "skin_cast", "skin_hue", "wide", "temp", "tint",
 )
 SLIDER_AREA_H = 166
 TOOLS = ["Pędzel D&B", "Kadr"]
@@ -233,29 +235,39 @@ class RetuszApp(ctk.CTk):
         pcell = ctk.CTkFrame(f1, fg_color=T.CARD); pcell.grid(row=1, column=3, sticky="ew", padx=6, pady=3)
         pcell.grid_columnconfigure(0, weight=1)
         T.label(pcell, "Presety", 13, anchor="w").grid(row=0, column=0, sticky="w")
-        pb_save = T.button(pcell, "+ Zapisz", self.save_custom_preset_dialog, width=58)
-        pb_save.configure(height=20, font=T.font(11)); pb_save.grid(row=0, column=1, sticky="e")
+        pb_ser = T.button(pcell, "→seria", self.preset_to_series, width=46)
+        pb_ser.configure(height=20, font=T.font(10)); pb_ser.grid(row=0, column=1, sticky="e", padx=(0, 2))
+        pb_save = T.button(pcell, "+Zapisz", self.save_custom_preset_dialog, width=50)
+        pb_save.configure(height=20, font=T.font(10)); pb_save.grid(row=0, column=2, sticky="e")
         self.preset_menu = ctk.CTkOptionMenu(
             pcell, values=[p.name for p in self.presets], command=self.apply_preset_by_name,
             width=140, height=26, fg_color=T.BTN, button_color=T.BTN, button_hover_color=T.BTN_HOVER,
             text_color=T.TEXT, font=T.font(11), dropdown_font=T.font(12), corner_radius=8
         )
-        self.preset_menu.set("Portret naturalny"); self.preset_menu.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self.preset_menu.set("Portret naturalny"); self.preset_menu.grid(row=1, column=0, columnspan=3, sticky="ew")
 
-        hint = T.label(f1, "Dwuklik na suwaku: reset  ·  \\ : Przed/Po  ·  M: maska skóry  ·  Ctrl+Z/Y: cofnij/ponów", 11, T.MUTED, anchor="w")
-        hint.grid(row=2, column=0, columnspan=4, sticky="sw", padx=6, pady=(14, 3))
+        hint = T.label(f1, "Dwuklik na suwaku: reset  ·  \\ : Przed/Po  ·  M: maska skóry", 11, T.MUTED, anchor="w")
+        hint.grid(row=2, column=2, columnspan=2, sticky="sw", padx=6, pady=(14, 3))
 
-        # Tab 2 (Collapsible / on-demand Reference Match bonus section):
+        # Tab 2 (Collapsible / on-demand Reference Match & ColorChecker bonus section):
         f2 = self.slider_frames[SLIDER_TABS[2]]
-        rc = ctk.CTkFrame(f2, fg_color=T.CARD); rc.grid(row=0, column=2, columnspan=2, sticky="ew", padx=6, pady=3)
-        T.label(rc, "Wzorzec kolorystyczny (opcjonalny bonus AI)", 13, anchor="w").grid(row=0, column=0, columnspan=3, sticky="w")
-        b_ref = T.button(rc, "Wybierz wzorzec…", self.choose_reference, accent=True, width=134); b_ref.configure(height=28)
+        rc = ctk.CTkFrame(f2, fg_color=T.CARD); rc.grid(row=0, column=2, sticky="ew", padx=6, pady=3)
+        T.label(rc, "Wzorzec (AI)", 13, anchor="w").grid(row=0, column=0, columnspan=2, sticky="w")
+        b_ref = T.button(rc, "Wybierz…", self.choose_reference, accent=True, width=84); b_ref.configure(height=26)
         b_ref.grid(row=1, column=0, sticky="w", pady=(2, 0))
-        self.clear_ref_btn = T.button(rc, "Wyłącz wzorzec", self.clear_reference, width=116); self.clear_ref_btn.configure(height=28)
-        self.clear_ref_btn.grid(row=1, column=1, sticky="w", padx=(6, 0), pady=(2, 0))
+        self.clear_ref_btn = T.button(rc, "Wyłącz", self.clear_reference, width=64); self.clear_ref_btn.configure(height=26)
+        self.clear_ref_btn.grid(row=1, column=1, sticky="w", padx=(4, 0), pady=(2, 0))
+
+        cc_cell = ctk.CTkFrame(f2, fg_color=T.CARD); cc_cell.grid(row=0, column=3, sticky="ew", padx=6, pady=3)
+        T.label(cc_cell, "ColorChecker (24)", 13, anchor="w").grid(row=0, column=0, columnspan=2, sticky="w")
+        b_cc = T.button(cc_cell, "Z pliku…", self.choose_colorchecker, width=76); b_cc.configure(height=26)
+        b_cc.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        b_cc_cur = T.button(cc_cell, "Z kadru", self.calibrate_current_colorchecker, width=72); b_cc_cur.configure(height=26)
+        b_cc_cur.grid(row=1, column=1, sticky="w", padx=(4, 0), pady=(2, 0))
+
         self.ref_info_lbl = T.label(
             f2,
-            "Edytor działa samodzielnie bez wzorca. Wybierz zdjęcie wzorcowe (np. obrobione w PS), aby automatycznie dopasować paletę barw i kontrast.",
+            "Edytor działa samodzielnie bez wzorca. Wybierz zdjęcie wzorcowe albo zdjęcie z tablicą ColorChecker Classic (24 pola), aby skalibrować całą serię.",
             12, T.MUTED, anchor="w", justify="left"
         )
         self.ref_info_lbl.grid(row=1, column=0, columnspan=4, sticky="w", padx=6, pady=(10, 2))
@@ -448,14 +460,18 @@ class RetuszApp(ctk.CTk):
     def _sync_ref_ui(self):
         if not hasattr(self, "ref_info_lbl"): return
         if self.reference is not None:
-            self.ref_info_lbl.configure(
-                text=f"Aktywny wzorzec: {self.reference.path.name}  ·  Widok „Z wzorcem” w górnym pasku pokazuje 3 kolumny.",
-                text_color=T.ACCENT
-            )
+            rep = getattr(self.fit, "cc_report", None)
+            if rep is not None:
+                txt = f"{self.reference.path.name}  ·  {rep.summary_pl().replace('.', ',')}"
+            elif getattr(self.reference, "colorchecker", False):
+                txt = f"Tablica ColorChecker: {self.reference.path.name}  ·  Trwa analiza 24 pól…"
+            else:
+                txt = f"Aktywny wzorzec: {self.reference.path.name}  ·  Widok „Z wzorcem” w górnym pasku pokazuje 3 kolumny."
+            self.ref_info_lbl.configure(text=txt, text_color=T.ACCENT)
             self.clear_ref_btn.configure(state="normal")
         else:
             self.ref_info_lbl.configure(
-                text="Edytor działa samodzielnie bez wzorca. Wybierz zdjęcie wzorcowe (np. obrobione w PS), aby automatycznie dopasować paletę barw i kontrast.",
+                text="Edytor działa samodzielnie bez wzorca. Wybierz zdjęcie wzorcowe albo zdjęcie z tablicą ColorChecker Classic (24 pola), aby skalibrować całą serię.",
                 text_color=T.MUTED
             )
             self.clear_ref_btn.configure(state="disabled")
@@ -479,18 +495,42 @@ class RetuszApp(ctk.CTk):
         if p in self.photos:
             i = self.photos.index(p); self.photos.remove(p); self._build_strip()
             if self.photos: self.select(min(i, len(self.photos)-1))
-        self.load_reference(p)
+        self.load_reference(p, colorchecker=False)
 
-    def load_reference(self, p: Path):
-        self._set_status("Wczytuję wzorzec…")
+    def choose_colorchecker(self, path: Path | None = None):
+        if path is None:
+            p = filedialog.askopenfilename(title="Wybierz zdjęcie z tablicą ColorChecker (24 pola)",
+                                           initialdir=self.settings.last_folder or None, filetypes=PHOTO_TYPES)
+            if not p: return
+            path = Path(p)
+        else:
+            path = Path(path)
+        if self.series is None: self.series = Series(path.parent)
+        self.series.reference = path; self.series.save(); self.ref_enabled = True
+        self.load_reference(path, colorchecker=True)
+
+    def calibrate_current_colorchecker(self):
+        if self.idx < 0 or not self.photos:
+            self._set_status("Najpierw otwórz zdjęcie z tablicą ColorChecker."); return
+        self.choose_colorchecker(self.photos[self.idx])
+
+    def load_reference(self, p: Path, colorchecker: bool = False):
+        self._set_status("Kalibruję tablicę ColorChecker (24 pola)…" if colorchecker else "Wczytuję wzorzec…")
         side = self.settings.preview_side
         def work():
-            return Reference(p), imageio.load_preview(p, side, with_icc=True)
+            ref = Reference(p, colorchecker=colorchecker)
+            prev, icc = imageio.load_preview(p, side, with_icc=True)
+            cal_prev = CC.calibrate_chart(prev) if colorchecker else None
+            disp_prev = CC.draw_chart_overlay(prev, cal_prev) if cal_prev is not None else C.crop_border(prev, margin=2)
+            return ref, (disp_prev, icc), cal_prev
         def done(r):
-            self.reference, (self.ref_prev, ref_icc) = r; self.ref_analysis = None; self.ref_enabled = True
-            self.view_ref.set_image(C.crop_border(self.ref_prev, margin=2), icc=ref_icc, keep_view=False)
+            self.reference, (self.ref_prev, ref_icc), cal_prev = r
+            self.ref_analysis = None; self.ref_enabled = True
+            self.view_ref.set_image(self.ref_prev, icc=ref_icc, keep_view=False)
             if self.canvas_mode.get() != "Z wzorcem":
                 self.canvas_mode.set("Z wzorcem"); self._apply_canvas_layout()
+            if colorchecker and cal_prev is None:
+                self._set_status("Nie wykryto tablicy ColorChecker 24 na zdjęciu – używam dopasowania wzorca.")
             self._sync_ref_ui(); self.fit = None; self.refit()
         self.submit(work, done)
 
@@ -548,13 +588,14 @@ class RetuszApp(ctk.CTk):
         if self.src_prev is None or self.engine is None:
             self._update_status(); return
         i, src, ref, eng, icc = self.idx, self.src_prev, self.reference, self.engine, self.src_icc
-        self._set_status("Dopasowuję kolory…" if ref is not None else "Analizuję portret i mapę głębi 3D…")
+        cc_flag = bool(ref is not None and getattr(ref, "colorchecker", False))
+        self._set_status("Kalibruję ColorChecker…" if cc_flag else ("Dopasowuję kolory…" if ref is not None else "Analizuję portret i mapę głębi 3D…"))
         def work():
             ra = ref.analysis(eng, icc) if ref is not None else None
-            return ra, eng.fit(src, ra)
+            return ra, eng.fit(src, ra, colorchecker=cc_flag)
         def done(r):
             if self.idx != i: return
-            self.ref_analysis, self.fit = r; self._show_light(); self.request_render()
+            self.ref_analysis, self.fit = r; self._sync_ref_ui(); self._show_light(); self.request_render()
         self.submit(work, done, kind="fit")
 
     def request_render(self):
@@ -1130,11 +1171,29 @@ class RetuszApp(ctk.CTk):
     def apply_preset_by_name(self, name: str):
         pr = next((p for p in self.presets if p.name == name), None)
         if pr is None: return
+        if hasattr(self, "preset_menu"): self.preset_menu.set(pr.name)
         self._commit_history()
         self.params = pr.apply_to(self.params)
         self.detail_raw = None; self.view_res.detail = None
         self._load_params_into_ui(self.params); self._changed(discrete=True)
         self._set_status(f"Zastosowano preset: {pr.name}")
+
+    def preset_to_series(self):
+        name = self.preset_menu.get()
+        pr = next((p for p in self.presets if p.name == name), None)
+        if pr is None: return
+        self._commit_history()
+        self.params = pr.apply_to(self.params)
+        if self.series is not None:
+            self.series.params = pr.apply_to(self.series.params)
+            self.series.save()
+            for ph in self.photos:
+                if self.series.has_override(ph):
+                    self.series.set_override(ph, pr.apply_to(self.series.params_for(ph)))
+        self.detail_raw = None; self.view_res.detail = None
+        self._load_params_into_ui(self.params); self._refresh_strip_marks(); self._update_override_label()
+        self._changed(discrete=True)
+        self._set_status(f"Zastosowano preset dla całej serii: {pr.name}")
 
     def save_custom_preset_dialog(self):
         dlg = ctk.CTkInputDialog(text="Nazwa nowego presetu (zostanie zapisany w Twojej bibliotece):", title="Zapisz własny preset")

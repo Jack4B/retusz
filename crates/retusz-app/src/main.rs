@@ -583,6 +583,8 @@ impl eframe::App for RetuszStudioApp {
                             changed |= Self::slider_row(ui, "Dodge & Burn (skóra)", &mut p.db, 0.0..=1.0, 0.40, false);
                             changed |= Self::slider_row(ui, "Plastyka 3D", &mut p.plastic, 0.0..=1.0, 0.30, false);
                             changed |= Self::slider_row(ui, "Przejrzystość (Clarity)", &mut p.clarity, -1.0..=1.0, 0.0, false);
+                            changed |= Self::slider_row(ui, "Czysta skóra (zafarb)", &mut p.skin_cast, 0.0..=1.0, 0.0, false);
+                            changed |= Self::slider_row(ui, "Odcień skóry (OKLCh)", &mut p.skin_hue, -1.0..=1.0, 0.0, false);
                             changed |= Self::slider_row(ui, "Winieta", &mut p.vignette, -1.0..=1.0, 0.0, false);
                         });
 

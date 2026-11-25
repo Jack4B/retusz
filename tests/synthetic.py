@@ -218,3 +218,85 @@ def relight(rgb, cx=0.62, cy=0.32, rx=0.30, ry=0.35, lift=0.35, floor=0.80):
     h, w = rgb.shape[:2]; yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
     g = floor + lift*np.exp(-(((xx - cx*w)/(rx*w))**2 + ((yy - cy*h)/(ry*h))**2))
     return (np.clip(rgb.astype(np.float32)*g[..., None], 0, 255) + 0.5).astype(np.uint8)
+
+
+# Standard 24-patch ColorChecker Classic sRGB D65 reference values (4 rows x 6 cols, BabelColor / X-Rite D65):
+CC24_SRGB = np.array([
+    [115,  82,  68], [194, 150, 130], [ 98, 122, 157], [ 87, 108,  67], [133, 128, 177], [103, 189, 170],
+    [214, 126,  44], [ 80,  91, 166], [193,  90,  99], [ 94,  60, 108], [157, 188,  64], [224, 163,  46],
+    [ 56,  61, 150], [ 70, 148,  73], [175,  54,  60], [231, 199,  31], [187,  86, 149], [  8, 133, 161],
+    [243, 243, 242], [200, 200, 200], [160, 160, 160], [122, 122, 121], [ 85,  85,  85], [ 52,  52,  52],
+], dtype=np.uint8)
+
+
+def colorchecker_chart(patch_px=64, gap_px=12, border_px=24):
+    """Generate a synthetic 24-patch ColorChecker Classic chart (rgb uint8, 24x2 float32 patch centres)."""
+    cols, rows = 6, 4
+    w = 2 * border_px + cols * patch_px + (cols - 1) * gap_px
+    h = 2 * border_px + rows * patch_px + (rows - 1) * gap_px
+    chart = np.full((h, w, 3), 24, dtype=np.uint8)
+    # white corner fiducial L-marks on the dark frame
+    m = max(6, border_px // 2)
+    for (x0, y0, dx, dy) in ((6, 6, 1, 1), (w - 7, 6, -1, 1), (6, h - 7, 1, -1), (w - 7, h - 7, -1, -1)):
+        cv2.line(chart, (x0, y0), (x0 + dx * m, y0), (225, 225, 225), 2)
+        cv2.line(chart, (x0, y0), (x0, y0 + dy * m), (225, 225, 225), 2)
+    centres = []
+    for r in range(rows):
+        for c in range(cols):
+            idx = r * cols + c
+            x0 = border_px + c * (patch_px + gap_px)
+            y0 = border_px + r * (patch_px + gap_px)
+            chart[y0:y0 + patch_px, x0:x0 + patch_px] = CC24_SRGB[idx]
+            centres.append([x0 + patch_px * 0.5, y0 + patch_px * 0.5])
+    return chart, np.array(centres, dtype=np.float32)
+
+
+def apply_illuminant_cast(rgb, gains=(1.22, 0.96, 0.74), ev=-0.4, cross=0.04):
+    """Simulate a non-D65 studio/location light source (e.g. warm tungsten or green-cast LED + exposure offset)
+    in linear light so a root-polynomial / Bradford calibration can recover the D65 truth."""
+    x = rgb.astype(np.float32) / 255.0
+    lin = np.where(x <= 0.04045, x / 12.92, ((x + 0.055) / 1.055) ** 2.4)
+    g = np.array(gains, dtype=np.float32) * (2.0 ** float(ev))
+    M = np.array([
+        [g[0], cross * g[0], 0.0],
+        [0.5 * cross * g[1], g[1], 0.5 * cross * g[1]],
+        [0.0, cross * g[2], g[2]],
+    ], dtype=np.float32)
+    out_lin = np.clip(lin @ M.T, 0.0, 1.0)
+    srgb = np.where(out_lin <= 0.0031308, 12.92 * out_lin, 1.055 * np.power(out_lin, 1.0 / 2.4) - 0.055)
+    return (np.clip(srgb, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+
+
+def portrait_with_colorchecker(h=1800, w=1200, patch_px=52, angle=6.0, pos=(0.30, 0.74),
+                               gains=(1.22, 0.96, 0.74), ev=-0.4, seed=0):
+    """Synthetic portrait scene with a 24-patch ColorChecker chart placed at `pos` (cx, cy fractions),
+    rotated by `angle` degrees, both un-cast (D65 ground truth) and with an illuminant cast applied.
+    Returns (cast_rgb, gt_rgb, gt_centres_24x2, info)."""
+    gt_base, info = portrait_scene(h=h, w=w, seed=seed)
+    chart, c_pts = colorchecker_chart(patch_px=patch_px, gap_px=max(8, patch_px // 5), border_px=max(16, patch_px // 3))
+    ch, cw = chart.shape[:2]
+    pad = int(np.hypot(ch, cw)) + 8
+    canvas = np.zeros((pad, pad, 3), dtype=np.uint8)
+    mask = np.zeros((pad, pad), dtype=np.float32)
+    ox, oy = (pad - cw) // 2, (pad - ch) // 2
+    canvas[oy:oy + ch, ox:ox + cw] = chart
+    mask[oy:oy + ch, ox:ox + cw] = 1.0
+    pts = c_pts + np.array([ox, oy], dtype=np.float32)
+    R = cv2.getRotationMatrix2D((pad / 2.0, pad / 2.0), angle, 1.0)
+    rot_chart = cv2.warpAffine(canvas, R, (pad, pad), flags=cv2.INTER_LINEAR)
+    rot_mask = cv2.warpAffine(mask, R, (pad, pad), flags=cv2.INTER_LINEAR)[..., None]
+    pts_h = np.hstack([pts, np.ones((24, 1), dtype=np.float32)])
+    rot_pts = (pts_h @ R.T).astype(np.float32)
+
+    cx, cy = int(pos[0] * w), int(pos[1] * h)
+    x0, y0 = cx - pad // 2, cy - pad // 2
+    gt = gt_base.copy()
+    xa, ya = max(0, x0), max(0, y0)
+    xb, yb = min(w, x0 + pad), min(h, y0 + pad)
+    ca = rot_chart[ya - y0:yb - y0, xa - x0:xb - x0]
+    ma = rot_mask[ya - y0:yb - y0, xa - x0:xb - x0]
+    gt[ya:yb, xa:xb] = (gt[ya:yb, xa:xb].astype(np.float32) * (1.0 - ma) + ca.astype(np.float32) * ma + 0.5).astype(np.uint8)
+    gt_centres = rot_pts + np.array([x0, y0], dtype=np.float32)
+    cast_rgb = apply_illuminant_cast(gt, gains=gains, ev=ev)
+    return cast_rgb, gt, gt_centres, info
+
