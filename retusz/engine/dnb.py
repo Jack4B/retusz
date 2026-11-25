@@ -46,9 +46,13 @@ def _lin_to_srgb(x): return np.where(x <= 0.0031308, x*12.92, 1.055*np.power(np.
 def _Y_to_L(Y): return np.where(Y > 0.008856, 116*np.cbrt(Y) - 16, 903.3*Y).astype(np.float32)
 def _L_to_Y(L): return np.where(L > 8.0, ((L + 16)/116)**3, L/903.3).astype(np.float32)
 
+_LUT_LIN = None
 def lightness(rgb8):
-    """CIE L* (D65) of an sRGB uint8 image, float32."""
-    return _Y_to_L(_srgb_to_lin(rgb8.astype(np.float32)/255) @ _LW)
+    """CIE L* (D65) of an sRGB uint8 image, float32 (per-channel linearisation through a 256-entry table)."""
+    global _LUT_LIN
+    if _LUT_LIN is None: _LUT_LIN = _srgb_to_lin(np.arange(256, dtype=np.float32)/255)
+    Y = _LUT_LIN[rgb8[..., 0]]*_LW[0]; Y += _LUT_LIN[rgb8[..., 1]]*_LW[1]; Y += _LUT_LIN[rgb8[..., 2]]*_LW[2]
+    return _Y_to_L(Y)
 
 # ---------------------------------------------------------------- edge-preserving bases (candidates)
 def weighted_guided(I, w, r, eps):
@@ -170,18 +174,20 @@ def fast_guided(I, p, r, eps, s):
         a = cv2.resize(a, (w, h), interpolation=cv2.INTER_LINEAR); b = cv2.resize(b, (w, h), interpolation=cv2.INTER_LINEAR)
     return a*I + b
 
-def apply_dL(rgb8, dL):
+def apply_dL(rgb8, dL, rows=256):
     """Luminance-only change in linear light: every channel scaled by Y'/Y (chromaticity kept), never pushing a
-    channel above 0.98 by brightening. Pixels with |dL| < 1e-3 are returned bit-identical."""
-    act = np.abs(dL) > 1e-3
-    if not act.any(): return rgb8
-    lin = _srgb_to_lin(rgb8[act].astype(np.float32)/255)
-    Y = lin @ _LW; L = _Y_to_L(Y)
-    g = _L_to_Y(np.clip(L + dL[act], 0, 100))/np.maximum(Y, 1e-6)
-    mx = lin.max(1)
-    g = np.where(g > 1, np.minimum(g, np.maximum(1.0, 0.98/np.maximum(mx, 1e-6))), g)
+    channel above 0.98 by brightening. Pixels with |dL| < 1e-3 are returned bit-identical. Works in row strips
+    (24 Mpx originals: bounded memory)."""
     out = rgb8.copy()
-    out[act] = np.clip(_lin_to_srgb(lin*g[:, None])*255 + 0.5, 0, 255).astype(np.uint8)
+    for y in range(0, rgb8.shape[0], rows):
+        d = dL[y:y+rows]; act = np.abs(d) > 1e-3
+        if not act.any(): continue
+        lin = _srgb_to_lin(rgb8[y:y+rows][act].astype(np.float32)/255)
+        Y = lin @ _LW; L = _Y_to_L(Y)
+        g = _L_to_Y(np.clip(L + d[act], 0, 100))/np.maximum(Y, 1e-6)
+        mx = lin.max(1)
+        g = np.where(g > 1, np.minimum(g, np.maximum(1.0, 0.98/np.maximum(mx, 1e-6))), g)
+        blk = out[y:y+rows]; blk[act] = np.clip(_lin_to_srgb(lin*g[:, None])*255 + 0.5, 0, 255).astype(np.uint8)
     return out
 
 def dodge_burn_v2(rgb, skin, faces_px, lms_px, strength, method="guided"):
@@ -220,6 +226,6 @@ def dodge_burn_v2(rgb, skin, faces_px, lms_px, strength, method="guided"):
     if y1 == H: wy[-m:] = 1
     if x0 == 0: wx[:m] = 1
     if x1 == W: wx[-m:] = 1
-    dL = (dL*(wy[:, None]*wx[None, :])).astype(np.float32)
+    dL *= (wy[:, None]*wx[None, :]).astype(np.float32)
     out = rgb.copy(); out[y0:y1, x0:x1] = apply_dL(crop, dL)
     return out

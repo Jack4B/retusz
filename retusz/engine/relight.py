@@ -67,7 +67,8 @@ def normals(depth, subject=None):
         w = cv2.erode((subject > 0.5).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))).astype(np.float32)
         wide = max(sg, depth.shape[1]/60)
         fill = cv2.GaussianBlur(depth*w, (0, 0), wide)/(cv2.GaussianBlur(w, (0, 0), wide) + 1e-6)
-        depth = w*depth + (1 - w)*fill
+        ws = cv2.GaussianBlur(w, (0, 0), max(1.0, depth.shape[1]/150))*w      # smooth seam: no curvature valley
+        depth = ws*depth + (1 - ws)*fill
     d = cv2.GaussianBlur(depth, (0, 0), sg)
     gx = cv2.Sobel(d, cv2.CV_32F, 1, 0, ksize=3)/8; gy = cv2.Sobel(d, cv2.CV_32F, 0, 1, ksize=3)/8
     mag = np.hypot(gx, gy); ref = mag[subject > 0.5] if subject is not None and (subject > 0.5).sum() > 100 else mag
@@ -154,8 +155,14 @@ class Relight:
         shade = np.clip(n@l - l[2], -0.8, 0.5)                      # flat, camera-facing = 0
         sb = max(qw, qh)/300                                         # spread inside the subject only
         shade = cv2.GaussianBlur(shade*fg, (0, 0), sb)/(cv2.GaussianBlur(fg, (0, 0), sb) + 1e-4)
-        inner = cv2.GaussianBlur(np.clip(2*fg - 1, 0, 1), (0, 0), max(1.0, max(qw, qh)/400))
-        curv = curv*inner*inner                                      # no ridge at the silhouette's depth step
+        # near the silhouette (~3 % of the frame) the depth model's step gives grazing normals and a curvature
+        # valley: there the curvature fades out and the shading blends into the subject's broad shading, so the
+        # volume falls off smoothly instead of drawing a dark line just inside the outline
+        band = cv2.GaussianBlur(np.clip(2*fg - 1, 0, 1), (0, 0), max(1.0, max(qw, qh)/60))**2
+        curv = curv*band
+        wb = max(qw, qh)/40
+        broad = cv2.GaussianBlur(shade*fg, (0, 0), wb)/(cv2.GaussianBlur(fg, (0, 0), wb) + 1e-4)
+        shade = band*shade + (1 - band)*broad
         # local contrast on an edge-preserving base (guided filter): no halos around glasses, hair or shoulders
         Lb = guided_filter(Lq.astype(np.float32), max(2, int(max(qw, qh)/60)), 6.0**2)
         clarity = np.clip(Lq-Lb, -6, 6)/np.maximum(Lq, 25)
