@@ -65,3 +65,30 @@ def test_generative_style_ai_grainy_original_registers():
                             island=(0.55, 0.45, 0.10, 0.02, -0.01), regen=((0.05, 0.05, 0.55, 0.45),))
     al = A.register(o, ai, flow="auto")
     assert al.inliers >= 12 and al.ncc > 0.3 and al.residual_px < 4.0, (al.inliers, al.ncc, al.residual_px)
+
+
+def test_keystone_ai_registers_with_homography(scene):
+    """A re-rendered copy with a slight perspective change (keystone ~1 %): no affine fits all corners;
+    the projective model must be picked automatically and be accurate everywhere."""
+    o, gt = scene
+    ai, T = make_ai(gt, 3, 0.5, (1.5, -2.0), 0.05)
+    h, w = ai.shape[:2]
+    src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
+    dst = np.float32([[0.012*w, 0], [w*(1-0.012), 0], [w, h], [0, h]])       # top edge narrower
+    P = cv2.getPerspectiveTransform(src, dst)
+    ai2 = cv2.warpPerspective(ai, P, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+    true_H = P @ np.vstack([T, [0, 0, 1]])
+    def true_map(Q):
+        q = (true_H @ np.c_[Q, np.ones(len(Q))].T).T; return q[:, :2]/q[:, 2:]
+    al = A.register(o, ai2, flow=False)
+    H_, W_ = o.shape[:2]; ys, xs = np.meshgrid(np.linspace(60, H_-60, 20), np.linspace(60, W_-60, 20), indexing="ij")
+    Q = np.c_[xs.ravel(), ys.ravel()]
+    a, b = true_map(Q), al.full_to_ai(Q)
+    ok = (a[:, 0] > 3) & (a[:, 0] < w-4) & (a[:, 1] > 3) & (a[:, 1] < h-4)
+    err = float(np.linalg.norm(a[ok] - b[ok], axis=1).mean()*3)
+    assert al.projective and err < 0.5, (al.projective, err)
+
+def test_plain_affine_ai_stays_affine(scene):
+    o, gt = scene
+    ai, T = make_ai(gt, 3, 1.5, (7.3, -4.6), 0.06)
+    assert not A.register(o, ai).projective

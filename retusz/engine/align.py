@@ -1,7 +1,9 @@
 """Registration of a low-resolution AI-edited copy onto the full-resolution original.
 
 1. SIFT keypoints (OpenCV, Apache-2.0) + RANSAC affine: scale, crop, shift, small rotation, aspect.
-2. ECC refinement (Evangelidis & Psarakis 2008, cv2.findTransformECC, MOTION_AFFINE).
+2. ECC refinement (Evangelidis & Psarakis 2008, cv2.findTransformECC), MOTION_AFFINE, then MOTION_HOMOGRAPHY
+   started from it; the projective model is kept only when it clearly fits better (a re-rendered copy with
+   a slight perspective / keystone change).
 3. Optional DIS optical flow (Kroeger et al. 2016, OpenCV) for small local drifts of generative tools,
    median-filtered, smoothed and clamped.
 All matching runs on local-contrast-normalised luminance, which is insensitive to the AI's new grading
@@ -38,7 +40,14 @@ def resize_to(img, wh):
     return cv2.resize(img, wh, interpolation=cv2.INTER_AREA)
 
 def _h(M):
-    return np.vstack([M, [0, 0, 1]])
+    return M if M.shape[0] == 3 else np.vstack([M, [0, 0, 1]])
+
+def apply_map(M, x, y):
+    """Points / pixel grids x, y through a 2x3 affine or a 3x3 projective matrix."""
+    u = M[0, 0]*x + M[0, 1]*y + M[0, 2]; v = M[1, 0]*x + M[1, 1]*y + M[1, 2]
+    if M.shape[0] == 2: return u, v
+    d = M[2, 0]*x + M[2, 1]*y + M[2, 2]
+    return u/d, v/d
 
 def _scale_map(sx, sy):
     """full -> resized frame, pixel-centre convention."""
@@ -46,7 +55,7 @@ def _scale_map(sx, sy):
 
 @dataclass
 class Alignment:
-    M: np.ndarray            # 2x3, work -> ai
+    M: np.ndarray            # 2x3 affine or 3x3 projective, work -> ai
     sx: float                # work px per full px (x)
     sy: float
     work_wh: tuple
@@ -59,7 +68,11 @@ class Alignment:
     @property
     def scale(self):
         """AI pixels per original pixel."""
-        return float(np.sqrt(abs(np.linalg.det(self.M[:, :2])))*np.sqrt(self.sx*self.sy))
+        d = 1.0 if self.M.shape[0] == 2 else float(self.M[2, 0]*self.work_wh[0]/2 + self.M[2, 1]*self.work_wh[1]/2 + self.M[2, 2])
+        return float(np.sqrt(abs(np.linalg.det(self.M[:2, :2])))/abs(d)*np.sqrt(self.sx*self.sy))
+
+    @property
+    def projective(self): return self.M.shape[0] == 3
 
     def full_to_work(self, P):
         P = np.asarray(P, np.float64)
@@ -71,15 +84,14 @@ class Alignment:
             fx = cv2.remap(self.flow[..., 0], Q[:, 0:1].astype(np.float32), Q[:, 1:2].astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
             fy = cv2.remap(self.flow[..., 1], Q[:, 0:1].astype(np.float32), Q[:, 1:2].astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
             Q = Q + np.c_[fx.ravel(), fy.ravel()]
-        return (self.M @ np.c_[Q, np.ones(len(Q))].T).T
+        return np.c_[apply_map(self.M, Q[:, 0], Q[:, 1])]
 
     def maps(self):
         """remap() maps from the work frame into AI pixel coordinates."""
         w, h = self.work_wh
         yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
         if self.flow is not None: xx = xx + self.flow[..., 0]; yy = yy + self.flow[..., 1]
-        M = self.M.astype(np.float32)
-        return M[0, 0]*xx + M[0, 1]*yy + M[0, 2], M[1, 0]*xx + M[1, 1]*yy + M[1, 2]
+        return apply_map(self.M.astype(np.float32), xx, yy)
 
     def warp_to_work(self, ai, interp=cv2.INTER_CUBIC):
         """AI image resampled into the work frame + validity mask (1 where the AI covers the original)."""
@@ -123,11 +135,11 @@ def _sift_affine(ga, gb):
         raise AlignmentError("Wersja AI jest zniekształcona względem oryginału.")
     return M.astype(np.float64), n
 
-def _ecc(t, i, M, mask):
+def _ecc(t, i, M, mask, motion=cv2.MOTION_AFFINE):
     warp = M.astype(np.float32).copy()
     crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 200, 1e-7)
     try:
-        cc, warp = cv2.findTransformECC(t, i, warp, cv2.MOTION_AFFINE, crit, mask, 5)
+        cc, warp = cv2.findTransformECC(t, i, warp, motion, crit, mask, 5)
     except cv2.error:
         return M, 0.0
     return warp.astype(np.float64), float(cc)
@@ -172,6 +184,12 @@ def register(orig, ai, flow=False, orig_small=None) -> Alignment:
     t = lcn(gray(work)); i = lcn(gb)
     al = Alignment(M, sx, sy, (ww, hw), (wa, ha), None, 0.0, 0.0, n)
     al.M, cc = _ecc(t, i, al.M, None)       # inputMask is in AI coordinates; the AI is valid everywhere
+    Hm, cch = _ecc(t, i, _h(al.M), None, cv2.MOTION_HOMOGRAPHY)
+    if Hm.shape == (3, 3) and abs(Hm[2, 2]) > 1e-9:
+        Hm = Hm/Hm[2, 2]
+        persp = abs(Hm[2, 0])*ww + abs(Hm[2, 1])*hw          # relative scale change across the frame
+        if cch - cc > 0.002 and (1 - cch) < 0.85*(1 - cc) and persp < 0.15:
+            al.M, cc = Hm, cch
     al.ncc = cc
     if cc < 0.2:
         raise AlignmentError("Wersja AI nie pasuje do oryginału (niska korelacja po dopasowaniu).")
