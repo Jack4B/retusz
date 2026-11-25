@@ -1,4 +1,4 @@
 """Retusz: dopasowanie kolorów do wzorca i subtelny dodge & burn. Autor: Jack4B."""
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 __author__ = "Jack4B"
 APP_NAME = "Retusz"

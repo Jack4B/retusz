@@ -43,3 +43,31 @@ User feedback: 0.1.4 D&B at high slider "wygląda tragicznie"; "poświata dooko�
   and whole image, out/in ratio (coarse ≥ 0.9, fine ≥ 0.9).
 - Skin: blotch-band variance reduction (50 %/100 %), HF texture ≥ 90 %, ΔE_ab (a/b only) mean < 2,
   no new clipping, monotonic with slider, preview vs export ΔE < 1.
+
+## Measured (0.1.6, cloud box, synthetic portraits only – no client photos)
+`python tools/quality_gate.py --dnb OUT [photo …]`; sheets `dnb_*_stary_nowy.jpg`, `dnb_*_algorytmy_100.jpg`,
+`plastyka_*_krawedz_100.jpg`, `plastyka_*_calosc.jpg`. Synthetic portrait 1200×1800 (face 360 px, glasses, nose shadow,
+blotches ~2.5 L*, pores, grain), D&B at 100 %:
+
+| algorithm | blotch left | nose shadow kept | fine texture | modelling (fw/6) | ring outside skin \|ΔL*\| | glasses/eyes/lips \|ΔL*\| | C*/(L*+16) where darkened | max \|ΔL*\| | time (crop) |
+|---|---|---|---|---|---|---|---|---|---|
+| 0.1.5 v1 (Gaussian band, a*b* kept) | 0.35 | 0.41 | 1.00 | 1.02 | **4.5** | **13.0** | **+9.6 %** | 33.7 | 0.12 s |
+| v2 base = Gaussian | 0.27 | **0.55** | 1.00 | 0.98 | 0.05 | 0.08 | +0.1 % | 6.3 | 0.23 s |
+| **v2 base = guided filter (shipped)** | 0.42 | 0.66 | 1.00 | 0.98 | 0.03 | 0.03 | +0.1 % | 6.0 | 0.17 s |
+| v2 base = WLS (CG) | 0.60 | 0.77 | 1.00 | 0.98 | 0.02 | 0.04 | +0.1 % | 5.6 | 1.45 s |
+
+Guided vs WLS: WLS keeps real shading edges a bit better but evens blotches less at the same settings and is ~8×
+slower (24 Mpx: guided 1.1 s, WLS 3.1 s for the whole D&B step); the Gaussian base flattens the nose shadow. Local
+Laplacian was not implemented: at the face=256 px analysis scale it would be affordable, but the guided base already
+meets every target and the user chose it. Full-strength look (D&B + Plastyka 3D at 100 %):
+
+| | halo outside (0–3 % vs 6–12 %) | line inside the outline | background far away | contrast fine / mid / coarse | person mid | person/background separation |
+|---|---|---|---|---|---|---|
+| 0.1.5 | 0.78 L* | 0.67 | **−3.4 L*** | 0.98 / **0.80** / **0.85** | **0.71** | **0.57** |
+| 0.1.6 | 0.03 L* | 0.14 | 0.0 | 1.02 / 1.03 / 1.00 | 1.05 | 0.95 |
+
+Preview (1/4) vs export ΔE 0.31. Root causes fixed in Plastyka 3D besides the background term: the depth model's
+soft, too-wide outline (now binarised, snapped to image edges, face-seeded so background objects and skin-coloured
+background patches drop out), normals/curvature at the depth step (subject-only depth, smooth seam, curvature faded
+and shading blended to the broad subject shading in the outer ~3 %).
+Open: real photos (glasses, beards, several faces, low key) must be run through the gate on the PC.

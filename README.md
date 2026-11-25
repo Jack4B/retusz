@@ -1,4 +1,4 @@
-# Retusz 0.1.5
+# Retusz 0.1.6
 
 Aplikacja na Windows: przenosi wygląd Twojego wzorca (np. zdjęcia obrobionego w Photoshopie) na całą serię zdjęć,
 dodaje **Plastykę 3D** (światło kierunkowe z mapy głębi) i subtelny **dodge & burn**. Autor: Jack4B.
@@ -6,6 +6,19 @@ dodaje **Plastykę 3D** (światło kierunkowe z mapy głębi) i subtelny **dodge
 ## Kontrola jakości
 
 `tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--pair-export EKSPORT WZORZEC` ocenia gotowy eksport.
+
+### 0.1.6
+- **Dodge & burn od nowa** – naturalny także przy 100%:
+  - wyrównuje tylko plamy na skórze; naturalne cienie twarzy (boki nosa, policzki, żuchwa) zostają, a drobna
+    faktura skóry (pory) nie jest ruszana;
+  - dokłada delikatne światło i cień na konturach twarzy (czoło, grzbiet nosa, kości policzkowe, broda / pod
+    kośćmi policzkowymi, linia żuchwy) według punktów twarzy;
+  - zmienia tylko jasność, bez przesycania barwy (koniec z pomarańczową skórą przy przyciemnianiu);
+  - bez obwódek wokół okularów, oczu, ust i włosów; siła ma miękki limit.
+- **Plastyka 3D bez poświaty wokół ludzi**: nie przyciemnia już tła, światło kończy się dokładnie na krawędzi postaci,
+  bryła łagodnie opada ku krawędziom bez ciemnej linii; obiekty tła nie są „rzeźbione”. Obraz nie robi się płaski.
+- Bramka jakości: `quality_gate.py --dnb` mierzy poświatę na krawędziach postaci, utratę kontrastu i stan skóry,
+  porównuje stary i nowy algorytm oraz trzy warianty wygładzania.
 
 ### 0.1.5
 - **Przenieś grading z AI** działa z prawdziwymi wersjami z generatywnego AI (Gemini / Nano Banana), które mają inny
