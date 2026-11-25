@@ -1,4 +1,4 @@
-# Retusz 0.1.7
+# Retusz 0.1.8
 
 Aplikacja na Windows: przenosi wygląd Twojego wzorca (np. zdjęcia obrobionego w Photoshopie) na całą serię zdjęć,
 oferuje precyzyjną obróbkę tonalną i barwną w przestrzeni OKLab (Ekspozycja EV, Kontrast, Światła/Cienie, Biele/Czernie,
@@ -7,6 +7,15 @@ Balans bieli Bradford CAT, Przejrzystość), **Plastykę 3D** (światło kierunk
 ## Kontrola jakości
 
 `tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--pair-export EKSPORT WZORZEC` ocenia gotowy eksport.
+
+### 0.1.8
+- **Przebudowane okno „Przenieś grading z AI”**:
+  - **Widok Obok siebie** (domyślny): dwa zsynchronizowane podglądy **Oryginał (przed) | Wynik (po)** lub **Wersja AI | Wynik (po)** z wspólnym przesuwaniem i przybliżaniem (do 400%);
+  - **Prawdziwe 1:1 w pełnej rozdzielczości** przy przybliżeniu (`Dopasuj`, `100%`, `200%`, `Ctrl+0/1/2`, kółko myszy wokół kursora) — po stronie Oryginału i Wyniku widać natywne ziarno i ostrość bez skalowania z podglądu;
+  - **Podział**, **Miganie** i szybkie **Przed/Po (`\`)** obsługują porównanie zarówno z **Oryginałem**, jak i z **Wersją AI**;
+  - **Natychmiastowe suwaki i pędzel (`PreviewCache`)**: jednorazowy cache siatki BGU i Lab podglądu, dwuklik przywraca 100%, **Cofnij (`Ctrl+Z`)** i `[` / `]` dla pędzla jasności;
+  - **Pasek postępu etapów** podczas dopasowania i zapisu oraz przycisk **Zapisz i edytuj** otwierający gotowy eksport w głównym edytorze (oryginał pozostaje nietknięty);
+  - **Poprawka krytycznego błędu na prawdziwych zdjęciach z AI** (`align.py:full_to_ai`): przy aktywnym przepływie optycznym (`flow=True`, typowym dla Gemini / Nano Banana) podgląd > 32 767 pikseli nie powoduje już błędu OpenCV `SHRT_MAX`.
 
 ### 0.1.7
 - **Nowe parametry obróbki i silnik tonalny OKLab** (działają także przy `Siła kolorów = 0%`, w tablicy 3D LUT bez kosztu wydajności; podgląd = eksport ΔE < 1):
