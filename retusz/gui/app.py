@@ -331,7 +331,7 @@ class RetuszApp(ctk.CTk):
     def open_transfer(self):
         from .transfer_view import TransferWindow
         cur = self.photos[self.idx] if 0 <= self.idx < len(self.photos) else None
-        self.transfer_win = TransferWindow(self, orig=cur)
+        self.transfer_win = TransferWindow(self, orig=cur, on_open=self.open_path)
 
     def open_photo(self):
         p = filedialog.askopenfilename(title="Otwórz zdjęcie", initialdir=self.settings.last_folder or None,
