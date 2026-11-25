@@ -1,5 +1,6 @@
 """Quality gate: Retusz result vs the reference, per stage, plus preview == export.
 Usage: quality_gate.py OUTDIR SRC1 REF1 [SRC2 REF2 ...]   (or --pair-export EXPORT REF to score an existing export)
+       quality_gate.py --transfer OUTDIR [photo ...]       (AI grading transfer gate, see transfer_gate.py)
 Gate (defaults): skin chroma <= ref +5 %, skin hue within 4 deg of ref, global L/a/b mean within 3 of ref,
 L std within 15 % of ref, clipped pixels <= max(src, ref) + 0.3 %, preview vs export dE < 1."""
 import sys, json, time
@@ -125,7 +126,11 @@ def run_pair(eng, src_p, ref_p, out, idx):
     sheet.save(out/f"sheet_{idx}_{src_p.stem}.jpg", quality=88); return res
 
 def main():
-    args = sys.argv[1:]; out = Path(args.pop(0)); out.mkdir(parents=True, exist_ok=True)
+    args = sys.argv[1:]
+    if args and args[0] == "--transfer":                    # AI grading transfer gate (tools/transfer_gate.py)
+        sys.path.insert(0, str(Path(__file__).resolve().parent)); import transfer_gate
+        sys.exit(transfer_gate.main(args[1:]))
+    out = Path(args.pop(0)); out.mkdir(parents=True, exist_ok=True)
     if args and args[0] == "--pair-export":
         e, r = [np.asarray(Image.open(p).convert("RGB")) for p in args[1:3]]
         so, sr = stats(e), stats(r); print("eksport:", fmt(so)); print("wzorzec:", fmt(sr)); print("FAIL:" if gate(so, sr, sr) else "OK", gate(so, sr, sr)); return

@@ -27,6 +27,9 @@ jobs:
           python -c "from PIL import Image; import numpy as np; Image.fromarray((np.random.rand(600,900,3)*255).astype('uint8')).save('s.jpg'); Image.fromarray((np.random.rand(600,900,3)*200).astype('uint8')).save('r.jpg')"
           mkdir smoke; move s.jpg smoke\
           python -m retusz cli smoke --reference r.jpg --method ai_light
+          python -c "import sys; sys.path.insert(0,'tests'); from synthetic import textured, grade, make_ai; from PIL import Image; o,_=textured(900,1350,seed=5); a,_=make_ai(grade(o),3); Image.fromarray(o).save('t_o.jpg'); Image.fromarray(a).save('t_ai.png')"
+          python -m retusz transfer t_o.jpg t_ai.png
+          if (!(Test-Path Retusz\t_o_grading-ai.jpg)) { throw "transfer smoke: brak wyniku" }
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path dist\Retusz\* -DestinationPath Retusz-windows-x64.zip
