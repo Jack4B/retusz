@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field, asdict, fields
 import numpy as np, cv2
-from . import color as C, faces as F, render as R, modflows as MF, relight as RL
+from . import color as C, faces as F, render as R, modflows as MF, relight as RL, dnb as DNB
 from . import wb as WB, geometry as GEO
 
 GRID = 33
@@ -84,6 +84,7 @@ class Fit:
     guard_bg: tuple = None     # closed-loop background a/b correction (A, b), see _guard
     guard_skin: tuple = None   # closed-loop skin a/b correction (A, b)
     hue_k: object = None       # background per-hue chroma ratios (HUE_SECTORS)
+    lms_n: list = None         # YuNet landmarks per face (5x2) normalised to image width; None = from the box
 
 MASK_SIDE = 400   # skin mask working size (long side) for every resolution
 
@@ -179,27 +180,10 @@ def _guard(out_lab, out_m, ref_lab, ref_m, max_shift, c_lo, c_hi, mkl=0.0):
     f = float(np.clip(cr*c_hi/max(cn, 1e-3), 0, 1)) if cn > cr*c_hi else float(max(1.0, cr*c_lo/max(cn, 1e-3)))
     return ((A*f).astype(np.float32), (bb*f).astype(np.float32))
 
-def _dodge_burn_region(out, mq_raw, faces_px, strength):
-    """Auto D&B over ONE region covering all faces (overlapping per-face crops used to be pasted one over another,
-    which left hard seams across neighbouring faces). The L change is feathered to zero at the region border."""
-    H, W = out.shape[:2]
-    x0 = max(0, int(min(x - 0.6*w for x, y, w, h in faces_px))); y0 = max(0, int(min(y - 0.4*h for x, y, w, h in faces_px)))
-    x1 = min(W, int(max(x + 1.6*w for x, y, w, h in faces_px))); y1 = min(H, int(max(y + 1.9*h for x, y, w, h in faces_px)))
-    if x1-x0 < 8 or y1-y0 < 8: return out
-    mc = cv2.resize(mq_raw[y0//4:(y1+3)//4, x0//4:(x1+3)//4], (x1-x0, y1-y0), interpolation=cv2.INTER_LINEAR)
-    crop = out[y0:y1, x0:x1]; lab = C.to_lab(crop)
-    new = C.dodge_burn(lab, mc, [(x-x0, y-y0, w, h) for x, y, w, h in faces_px], strength)
-    dL = new[..., 0] - lab[..., 0]
-    fw = float(np.median([f[2] for f in faces_px])); m = max(4, int(0.15*fw))       # feather width
-    wy = np.clip(np.minimum(np.arange(y1-y0), np.arange(y1-y0)[::-1])/m, 0, 1)
-    wx = np.clip(np.minimum(np.arange(x1-x0), np.arange(x1-x0)[::-1])/m, 0, 1)
-    for edge_is_border, sl in ((y0 == 0, slice(None, m)), (y1 == H, slice(-m, None))):
-        if edge_is_border: wy[sl] = 1
-    for edge_is_border, sl in ((x0 == 0, slice(None, m)), (x1 == W, slice(-m, None))):
-        if edge_is_border: wx[sl] = 1
-    lab[..., 0] += dL*(wy[:, None]*wx[None, :]).astype(np.float32)
-    out = out.copy(); out[y0:y1, x0:x1] = C.from_lab(lab)
-    return out
+def _dodge_burn_region(out, mq_raw, faces_px, strength, lms_px=None):
+    """Auto D&B v2 (engine/dnb.py): one region for all faces, smooth luminance-only field on clean skin,
+    feathered at the region border. The v1 band filter is kept as color.dodge_burn for the quality gate."""
+    return DNB.dodge_burn_v2(out, mq_raw, faces_px, lms_px, strength)
 
 HUE_SECTORS = 8
 
@@ -255,7 +239,7 @@ class Engine:
     # ---------- stage 2 ----------
     def fit(self, src_rgb, ref: RefAnalysis) -> Fit:
         T = {}; t = time.perf_counter()
-        s = C.small(src_rgb, ANALYSIS_SIDE); fs = F.pick_faces(s); ms = F.skin_mask(s, fs)
+        s = C.small(src_rgb, ANALYSIS_SIDE); fs, lms = F.pick_faces(s, landmarks=True); ms = F.skin_mask(s, fs)
         S = C.to_lab(s); T["analyse_s"] = time.perf_counter()-t; t = time.perf_counter()
         G, Glab = C.grid_lab(GRID)
         if self.model:
@@ -291,6 +275,7 @@ class Engine:
         vig_diff = np.clip(ref.vig_profile - C.vignette_profile(Gs[..., 0], bg_g), -10, 0).astype(np.float32)
         W = s.shape[1]
         fit = Fit(glob, skin, d, [np.asarray(f, np.float32)/W for f in fs], vig_diff, (0.0, 0.0, 0.0), self.method or "classic", T)
+        fit.lms_n = [np.asarray(l, np.float32)/W for l in lms] if len(lms) == len(fs) else None
         t3 = time.perf_counter()
         fit.relight = RL.Relight(s, ms, fit.faces_n, self.depth_ai)
         if ref.light_angle is not None: fit.relight.auto_angle = ref.light_angle   # light like in the reference
@@ -380,7 +365,8 @@ class Engine:
         out = R.render(src, lut_bg, lut_sk, mq, gain)
         T["render_s"] = time.perf_counter()-t; t = time.perf_counter()
         if db_enabled and p.db > 0 and fit.faces_n:
-            out = _dodge_burn_region(out, mq_raw, [f*W for f in fit.faces_n], p.db)
+            lms = getattr(fit, "lms_n", None)
+            out = _dodge_burn_region(out, mq_raw, [f*W for f in fit.faces_n], p.db, [l*W for l in lms] if lms else None)
         T["dodge_burn_s"] = time.perf_counter()-t
         return (out, mq_raw) if return_mask else out
 

@@ -167,8 +167,10 @@ def portrait_scene(h=1800, w=1200, seed=0, grain=0.0):
     img = img*(1-torso[..., None]) + shirt*torso[..., None]
     skin_base = np.array([0.80, 0.60, 0.50], np.float32)
     shade = 1.0 - 0.18*np.clip((xx-cx)/(0.5*fw), -1, 1)**2 - 0.10*np.clip((yy-cy)/(0.66*fw), -1, 1)**2
-    blotch = 0.035*noise(0.03*fw)                               # uneven skin (mid frequency)
+    blotch = 0.022*noise(0.03*fw)                               # uneven skin (mid frequency), ~2.5 L*
     pores = 0.018*noise(0.8)
+    nose = cv2.GaussianBlur((blob(cx + 0.075*fw, cy + 0.05*fw, 0.035*fw, 0.17*fw) < 1).astype(np.float32), (0, 0), 0.012*fw)
+    shade = shade - 0.18*nose                                    # a real shading edge (side of the nose) that must stay
     skin = (skin_base*(shade + blotch + pores)[..., None]).astype(np.float32)
     sk = np.clip(head + neck, 0, 1)
     img = img*(1-sk[..., None]) + skin*sk[..., None]
@@ -197,7 +199,7 @@ def portrait_scene(h=1800, w=1200, seed=0, grain=0.0):
     skinm = sk*(1 - hair)*(1 - np.clip(cv2.dilate(feat, np.ones((5, 5), np.uint8))*2, 0, 1))
     face = (int(cx - 0.5*fw), int(cy - 0.66*fw), int(fw), int(1.32*fw))
     return rgb, dict(person=person, skin=skinm.astype(np.float32), face=face, lms=lms, poster=poster,
-                     features=feat, blotch=blotch*sk, fw=fw)
+                     features=feat, blotch=blotch*sk, fw=fw, nose_shadow=nose)
 
 
 def regen_fine(rgb, sigma=1.2, seed=0):

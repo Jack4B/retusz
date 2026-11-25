@@ -6,8 +6,9 @@ from .color import small
 
 _det = None; _lock = threading.Lock()
 
-def detect(rgb, score=0.7):
-    """Faces as [x, y, w, h] in rgb pixel coordinates."""
+def detect(rgb, score=0.7, landmarks=False):
+    """Faces as [x, y, w, h] in rgb pixel coordinates; with landmarks=True also a 5x2 array per face
+    (YuNet rows 4..13: right eye, left eye, nose tip, mouth right, mouth left), as (faces, lms)."""
     global _det
     sm = small(rgb, 1280); h, w = sm.shape[:2]
     with _lock:
@@ -15,13 +16,18 @@ def detect(rgb, score=0.7):
             _det = cv2.FaceDetectorYN.create(str(bundled_model("face_detection_yunet_2023mar.onnx")), "", (w, h), score)
         _det.setInputSize((w, h)); _, f = _det.detect(cv2.cvtColor(sm, cv2.COLOR_RGB2BGR))
     s = rgb.shape[1]/w
-    return [] if f is None else [np.asarray(x[:4]*s, np.float32) for x in f]
+    boxes = [] if f is None else [np.asarray(x[:4]*s, np.float32) for x in f]
+    if not landmarks: return boxes
+    return boxes, ([] if f is None else [np.asarray(x[4:14]*s, np.float32).reshape(5, 2) for x in f])
 
-def pick_faces(rgb):
-    """Main subjects only: drop faces narrower than 0.6x the widest (posters, background people)."""
-    f = detect(rgb)
-    if not f: return []
-    mw = max(x[2] for x in f); return [x for x in f if x[2] >= 0.6*mw]
+def pick_faces(rgb, landmarks=False):
+    """Main subjects only: drop faces narrower than 0.6x the widest (posters, background people).
+    landmarks=True returns (faces, lms) with the matching 5x2 landmark arrays."""
+    f, l = detect(rgb, landmarks=True)
+    if not f: return ([], []) if landmarks else []
+    mw = max(x[2] for x in f); keep = [i for i, x in enumerate(f) if x[2] >= 0.6*mw]
+    fs = [f[i] for i in keep]
+    return (fs, [l[i] for i in keep]) if landmarks else fs
 
 def skin_mask(rgb, fcs, hands=True):
     """Soft 0..1 mask. Faces+neck = ellipses ∩ YCrCb skin range. Hands/arms = pixels matching the
