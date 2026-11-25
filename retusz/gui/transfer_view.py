@@ -98,7 +98,8 @@ class TransferWindow(ctk.CTkToplevel):
     def _worker(self):
         while True:
             fn, done, gen = self._jobs.get()
-            if gen is not None and gen != self._gen: continue
+            if gen is not None and gen != self._gen:
+                self._ui.put((None, None)); continue
             try: self._ui.put((done, fn()))
             except Exception as e:  # noqa: BLE001
                 print(traceback.format_exc(), file=sys.stderr); self._ui.put((self._fail, e))

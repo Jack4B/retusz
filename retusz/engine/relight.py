@@ -229,6 +229,10 @@ class Relight:
         wb = max(qw, qh)/40
         broad = cv2.GaussianBlur(shade*fg, (0, 0), wb)/(cv2.GaussianBlur(fg, (0, 0), wb) + 1e-4)
         shade = band*shade + (1 - band)*broad
+        # keep subject mean exposure steady: 3D sculpt dodges the lit side and burns the shadow side equally
+        wsum = float(fg.sum())
+        if wsum > 10.0:
+            shade = shade - float((shade*fg).sum()/wsum)
         # local contrast on an edge-preserving base (guided filter): no halos around glasses, hair or shoulders
         Lb = guided_filter(Lq.astype(np.float32), max(2, int(max(qw, qh)/60)), 6.0**2)
         clarity = np.clip(Lq-Lb, -6, 6)/np.maximum(Lq, 25)
