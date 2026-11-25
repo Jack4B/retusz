@@ -149,7 +149,7 @@ def sample_nodes(grid: Grid, gh, gw, cell):
     A = grid.A
     return ((A[y0][:, x0]*(1-fx) + A[y0][:, x1]*fx)*(1-fy) + (A[y1][:, x0]*(1-fx) + A[y1][:, x1]*fx)*fy).astype(np.float64)
 
-def fit(guide, target, weight=None, cell=8.0, bins=8, lam=1e-4, sigma_xy=1.0, sigma_z=0.7, use_numba=None, prior_grid=None) -> Grid:
+def fit(guide, target, weight=None, cell=8.0, bins=12, lam=3e-5, sigma_xy=1.0, sigma_z=0.7, use_numba=None, prior_grid=None) -> Grid:
     """guide/target: float32 HxWx3 in 0..1 at the same (work) resolution; weight HxW in 0..1.
     prior_grid: a coarser fit used as the per-cell ridge target (where data is thin or missing)."""
     g = np.ascontiguousarray(guide, np.float32); t = np.ascontiguousarray(target, np.float32)

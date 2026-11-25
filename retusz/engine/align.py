@@ -81,7 +81,7 @@ class Alignment:
         M = self.M.astype(np.float32)
         return M[0, 0]*xx + M[0, 1]*yy + M[0, 2], M[1, 0]*xx + M[1, 1]*yy + M[1, 2]
 
-    def warp_to_work(self, ai, interp=cv2.INTER_LINEAR):
+    def warp_to_work(self, ai, interp=cv2.INTER_CUBIC):
         """AI image resampled into the work frame + validity mask (1 where the AI covers the original)."""
         mx, my = self.maps()
         out = cv2.remap(to_float(ai), mx, my, interp, borderMode=cv2.BORDER_REPLICATE)
@@ -133,7 +133,8 @@ def _residual(t, w, valid, tile=96):
 
 def _flow(t, w, valid):
     dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
-    f = dis.calc(to8(t), to8(w), None)
+    dis.setFinestScale(0); dis.setPatchSize(20); dis.setPatchStride(6); dis.setVariationalRefinementIterations(10)
+    f = dis.calc(to8(t), to8(w), None)        # 20 px patches: small ones alias on repeated text/patterns
     f = np.dstack([cv2.medianBlur(np.ascontiguousarray(f[..., c]), 5) for c in range(2)])
     wv = cv2.GaussianBlur(valid, (0, 0), 12) + 1e-4
     f = np.dstack([cv2.GaussianBlur(f[..., c]*valid, (0, 0), 12)/wv for c in range(2)])

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import numpy as np, cv2
 from . import align as AL, bgu
 
-PREFILTER = 2.0     # work px
+PREFILTER = 3.0     # work px
 COARSE_CELL = 48.0  # work px
 
 @dataclass
@@ -30,6 +30,7 @@ class Prepared:
     valid: np.ndarray            # work frame: 1 where the AI covers the original
     changed: np.ndarray          # work frame: 0..1, AI changed the structure here
     ai_work: np.ndarray          # AI resampled into the work frame, float32
+    full_wh: tuple = (0, 0)      # size of the original the alignment was made on
     extra: dict = field(default_factory=dict)
 
     @property
@@ -69,22 +70,25 @@ def to_lab(rgb01):
     return cv2.cvtColor(np.ascontiguousarray(np.clip(rgb01, 0, 1), np.float32), cv2.COLOR_RGB2Lab)
 
 # ---------------------------------------------------------------- changed-content map
-def _ncc_score(work, ai_w, hp_sigma, win):
+def _ncc_score(work, ai_w, hp_sigma, win, valid):
+    """Normalised convolution inside `valid` only: pixels outside the AI frame (replicated by remap) must not
+    lower the correlation of the windows next to the frame edge."""
+    v = valid.astype(np.float32)
+    def nblur(x, s): return cv2.GaussianBlur(x*v, (0, 0), s)/(cv2.GaussianBlur(v, (0, 0), s) + 1e-6)
     def hp(x):
-        g = AL.gray(x); return g - cv2.GaussianBlur(g, (0, 0), hp_sigma)
+        g = AL.gray(x); return (g - nblur(g, hp_sigma))*v
     a, b = hp(work), hp(ai_w)
-    B = lambda x: cv2.GaussianBlur(x, (0, 0), win)
-    va, vb, cab = B(a*a), B(b*b), B(a*b)
+    va, vb, cab = nblur(a*a, win), nblur(b*b, win), nblur(a*b, win)
     ncc = cab/np.sqrt(va*vb + 0.004**4)
     energy = np.sqrt(np.maximum(va, vb))
     gate = np.clip((energy - 0.006)/0.010, 0, 1)
-    return np.clip((0.6 - ncc)/0.35, 0, 1)*gate
+    return np.clip((0.6 - ncc)/0.35, 0, 1)*gate*v
 
 def changed_map(work, ai_w, valid, scales=((1.5, 4.0), (5.0, 12.0))):
     """0..1 where the AI's structure does not follow the original's (removed / added / redrawn), at a
     fine and a medium scale. Local normalised cross-correlation ignores the AI's local gain and colour,
     so regrading and relighting are not flagged."""
-    score = np.maximum.reduce([_ncc_score(work, ai_w, h, w) for h, w in scales])
+    score = np.maximum.reduce([_ncc_score(work, ai_w, h, w, valid) for h, w in scales])
     score = cv2.GaussianBlur(score, (0, 0), 2.0)
     m = np.clip((score - 0.25)/0.25, 0, 1)
     m = cv2.dilate(m, np.ones((5, 5), np.uint8))
@@ -105,7 +109,7 @@ def prepare(orig, ai, flow="auto", protect=True, progress=None) -> Prepared:
         return bgu.fit(bw, ba, w, prior_grid=coarse)
     raw = two_level(valid)
     grid = two_level(valid*(1 - changed)) if protect else raw
-    return Prepared(al, grid, raw, valid, changed, ai_w)
+    return Prepared(al, grid, raw, valid, changed, ai_w, full_wh=(orig.shape[1], orig.shape[0]))
 
 def _mask_rows(mask, y0, y1, W, H):
     mh, mw = mask.shape[:2]
@@ -114,12 +118,14 @@ def _mask_rows(mask, y0, y1, W, H):
     return cv2.remap(mask.astype(np.float32), mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 
 def render_float(prep: Prepared, orig, params: TransferParams, mask=None, y0=0, y1=None):
-    """Rows y0..y1 of the result as float32 0..1 (full resolution)."""
+    """Rows y0..y1 of the result as float32 0..1 (at the size of `orig`: full resolution or a preview)."""
     H, W = orig.shape[:2]; y1 = H if y1 is None else y1
     o = AL.to_float(orig[y0:y1])
     g = prep.grid if params.protect else prep.grid_raw
     al = prep.al
-    r = np.clip(bgu.slice_(o, g, al.sx, al.sy, y0=y0), 0, 1)
+    fw, fh = prep.full_wh if prep.full_wh[0] else (W, H)
+    sx, sy = al.sx*fw/W, al.sy*fh/H                         # a smaller preview of the same frame works too
+    r = np.clip(bgu.slice_(o, g, sx, sy, y0=y0), 0, 1)
     k, j = float(params.kolor), float(params.jasnosc)
     if k >= 0.999 and j >= 0.999 and mask is None: return r
     Lo, Lr = to_lab(o), to_lab(r)

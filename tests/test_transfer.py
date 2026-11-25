@@ -68,3 +68,20 @@ def test_removed_object_does_not_ghost():
     Y0, Y1, X0, X1 = y0*3+15, y1*3-15, x0*3+15, x1*3-15
     de = TR.delta_e2000(_lab(out[Y0:Y1, X0:X1]/255.).reshape(-1, 3), _lab(gt[Y0:Y1, X0:X1]/255.).reshape(-1, 3))
     assert de.mean() < 4.0, de.mean()
+
+def test_preview_render_on_smaller_image_matches_full(case):
+    o, gt, ai, T, prep = case
+    full = TR.render(prep, o, TR.TransferParams(kolor=0.8, jasnosc=0.6))
+    small = cv2.resize(o, (600, 400), interpolation=cv2.INTER_AREA)
+    prev = TR.render(prep, small, TR.TransferParams(kolor=0.8, jasnosc=0.6))
+    ref = cv2.resize(full, (600, 400), interpolation=cv2.INTER_AREA)
+    assert prev.shape == (400, 600, 3)
+    assert np.abs(prev.astype(int) - ref).mean() < 1.5
+
+def test_ai_frame_border_is_not_flagged_as_changed():
+    o, _ = textured(400, 600, seed=14); w = o.astype(np.float32)/255
+    valid = np.zeros((400, 600), np.float32); valid[30:-30, 40:-40] = 1      # AI covers the centre only
+    a = w.copy()                                                               # outside: replicated edge, as remap does
+    a[:30] = a[30]; a[-30:] = a[-31]; a[:, :40] = a[:, 40:41]; a[:, -40:] = a[:, -41:-40]
+    ch = TR.changed_map(w, a, valid)
+    assert float((ch*valid).sum()/valid.sum()) < 0.005

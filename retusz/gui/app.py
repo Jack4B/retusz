@@ -78,6 +78,7 @@ class RetuszApp(ctk.CTk):
         T.button(top, "Wzorzec", self.choose_reference).pack(side="left")
         T.button(top, "Porównaj", self.show_compare).pack(side="left", padx=8)
         T.button(top, "Ustawienia", self.open_settings).pack(side="left")
+        T.button(top, "Grading z AI", self.open_transfer, width=120).pack(side="left", padx=(8, 0))
         zb = ctk.CTkFrame(top, fg_color=T.BG); zb.pack(side="left", padx=(22, 0))
         T.button(zb, "Dopasuj", self.zoom_fit, width=78).pack(side="left")
         T.button(zb, "100%", self.zoom_100, width=58).pack(side="left", padx=6)
@@ -264,6 +265,11 @@ class RetuszApp(ctk.CTk):
         SettingsDialog(self, self.settings, saved)
 
     # ================= opening =================
+    def open_transfer(self):
+        from .transfer_view import TransferWindow
+        cur = self.photos[self.idx] if 0 <= self.idx < len(self.photos) else None
+        self.transfer_win = TransferWindow(self, orig=cur)
+
     def open_photo(self):
         p = filedialog.askopenfilename(title="Otwórz zdjęcie", initialdir=self.settings.last_folder or None,
                                        filetypes=PHOTO_TYPES)

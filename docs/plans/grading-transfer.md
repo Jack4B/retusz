@@ -66,7 +66,7 @@ non-rigid 1–2 px drift; one with a removed object; identity case AI = downscal
 |---|---|
 | alignment error vs the true transform, full-res px (mean over the frame) | < 0.5 |
 | ΔE2000 mean, result vs GT (inside the AI frame) | < 2.0 |
-| sharpness: high-frequency energy (Laplacian variance) result / GT | ≥ 0.95 |
+| sharpness: share of GT fine-detail amplitude reproduced, `<L(result),L(GT)>/<L(GT),L(GT)>` (L = Laplacian of luminance); the variance ratio is reported too | ≥ 0.95 |
 | naive AI upscale sharpness / GT (sanity, must be clearly worse) | reported |
 | halo: ΔE2000 mean in a 12 px band along strong edges | < 3.0 |
 | identity: ΔE2000 mean result vs original | < 0.6 |

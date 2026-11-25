@@ -25,11 +25,19 @@ def textured(h=1200, w=1800, seed=0):
     img = img*(1-disc[..., None]*0.35) + disc[..., None]*np.array([0.75, 0.55, 0.45], np.float32)*0.35
     return (np.clip(img, 0, 1)*255 + 0.5).astype(np.uint8), disc
 
-def content_mask(rgb, q=70):
-    """Edge-aligned local-grade mask for real photos: bright regions (e.g. sky, window)."""
-    Y = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)
-    Yb = cv2.GaussianBlur(Y, (0, 0), 3)
-    return (Yb > np.percentile(Yb, q)).astype(np.float32)
+def guided_gray(I, p, r, eps):
+    """He et al. 2010 guided filter, grey guide (box filters)."""
+    B = lambda x: cv2.boxFilter(x, -1, (2*r+1, 2*r+1))
+    mI, mp = B(I), B(p); a = (B(I*p) - mI*mp)/(B(I*I) - mI*mI + eps); b = mp - a*mI
+    return B(a)*I + B(b)
+
+def content_mask(rgb, q=70, hard=False):
+    """Local-grade mask for real photos: bright regions (sky, windows, light objects), refined with a guided
+    filter so it follows the photo's own edges like a real selection/AI mask does. hard=True keeps the raw
+    threshold (its contour cuts through smooth gradients: an artificial edge no photo has - stress case)."""
+    Y = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)/255
+    m = (cv2.GaussianBlur(Y, (0, 0), 3) > np.percentile(Y, q)).astype(np.float32)
+    return m if hard else np.clip(guided_gray(Y, m, 8, 1e-3), 0, 1)
 
 def grade(rgb, mask=None, relight=True):
     """Ground-truth 'AI' grading: tone curve, teal/orange colour matrix, smooth relight, sharp local grade."""
