@@ -1,12 +1,26 @@
-# Retusz 0.1.8
+# Retusz 0.2.0
 
-Aplikacja na Windows: przenosi wygląd Twojego wzorca (np. zdjęcia obrobionego w Photoshopie) na całą serię zdjęć,
-oferuje precyzyjną obróbkę tonalną i barwną w przestrzeni OKLab (Ekspozycja EV, Kontrast, Światła/Cienie, Biele/Czernie,
-Balans bieli Bradford CAT, Przejrzystość), **Plastykę 3D** (światło kierunkowe z mapy głębi) i subtelny **dodge & burn**. Autor: Jack4B.
+Aplikacja na Windows: pełnoprawny edytor portretowy z obróbką tonalną i barwną w przestrzeni OKLab (Ekspozycja EV, Kontrast,
+Światła/Cienie, Biele/Czernie, Balans bieli Bradford CAT, Przejrzystość), **Plastyką 3D** (światło kierunkowe z mapy głębi),
+subtelnym **dodge & burn**, biblioteką **Presetów**, przenoszeniem gradingu z AI oraz opcjonalnym dopasowaniem kolorów do
+wzorca. Autor: Jack4B.
 
 ## Kontrola jakości
 
 `tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--pair-export EKSPORT WZORZEC` ocenia gotowy eksport.
+
+### 0.2.0
+- **Pełnoprawny edytor studyjny (samodzielna praca bez wzorca + dopasowanie do wzorca jako otwierana sekcja dodatkowa)**:
+  - aplikacja działa od razu po otwarciu zdjęcia lub folderu (`Engine.fit(..., ref=None)`) — pełna obróbka tonalna OKLab/EV, Bradford CAT, Dodge&Burn v2, Plastyka 3D, kadr, pędzel i eksport JPG/serii nie wymagają wybierania zdjęcia wzorcowego;
+  - przełącznik widoku głównego płótna: **Wynik** (pełny ekran na jedno zdjęcie), **Przed | Po** (dwa zsynchronizowane widoki) oraz **Z wzorcem** (3 kolumny, włączane automatycznie po wybraniu wzorca);
+  - **Dopasowanie do wzorca (`▸ Wzorzec (AI)`)** wydzielone do osobnej, otwieranej na żądanie zakładki z przyciskami **Wybierz wzorzec…** i **Wyłącz wzorzec** oraz suwakami *Siła kolorów* i *Ochrona skóry*.
+- **Biblioteka Presetów (`*.retusz-preset.json`)**:
+  - 6 wbudowanych stylów studyjnych: *Portret naturalny*, *Ciepły złoty*, *Filmowy miękki*, *High-Key (jasny)*, *Studyjny kontrast 3D*, *B&W Klasyczny*;
+  - przycisk **`+ Zapisz`** zapisuje własne presety użytkownika (zachowując kadr i prostowanie każdego zdjęcia).
+- **Silnik i edytor w Rust + `wgpu` (GPU) + `egui` (`crates/retusz-core`, `crates/retusz-gpu`, `crates/retusz-app`)**:
+  - natywny workspace Cargo kompilowany do szybkiego pliku wykonywalnego `Retusz-Studio-GPU.exe` (`retusz-rs`) z compute shaderem WGSL (`render_main.wgsl`: LUT 33³ tetraedryczny + zysk D&B/Plastyki 3D/Przejrzystości + winieta + zebra przepaleń) i wielowątkowym CPU `rayon`, współdzielący format `*.retusz.json` i `*.retusz-preset.json`.
+- **Instalator Windows (`Retusz-Setup-x64.exe`, Inno Setup 6)**:
+  - każde wydanie publikuje w GitHub Releases zarówno instalator **`Retusz-Setup-x64.exe`** (polski kreator, ikony Menu Start / Pulpit, deinstalator), jak i paczkę portable **`Retusz-windows-x64.zip`**.
 
 ### 0.1.8
 - **Przebudowane okno „Przenieś grading z AI”**:

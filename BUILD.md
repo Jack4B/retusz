@@ -1,21 +1,26 @@
 # Budowanie Retusz dla Windows
 
 ## A. Lokalnie na Windows 10/11 (x64)
-1. Zainstaluj Python 3.11 lub 3.12 x64 (python.org, zaznacz „Add to PATH”).
+1. Zainstaluj Python 3.11 lub 3.12 x64 (python.org), Rust (`rustup`, stable x86_64-pc-windows-msvc) oraz opcjonalnie Inno Setup 6 (`iscc`).
 2. W folderze projektu:
    ```bat
+   cargo test --workspace --release
+   cargo build --workspace --release
    py -3 -m venv .venv
    .venv\Scripts\pip install -r requirements-dev.txt
    .venv\Scripts\python -m pytest -q
    .venv\Scripts\pyinstaller --noconfirm retusz.spec
+   copy target\release\retusz-rs.exe dist\Retusz\Retusz-Studio-GPU.exe
+   iscc installer\retusz.iss
    ```
-3. Wynik: `dist\Retusz\Retusz.exe` (rozmiar na Windows nie był jeszcze mierzony; ta sama paczka na Linuksie ma 525 MB, z czego 171 MB to llvmlite dla numba). Spakuj cały folder `dist\Retusz` do ZIP.
-   Jeden plik `.exe`: `set RETUSZ_ONEFILE=1` przed `pyinstaller` (wolniejszy start, bo rozpakowuje się przy każdym uruchomieniu).
+3. Wynik:
+   - instalator `dist\Retusz-Setup-x64.exe` (Inno Setup, polski kreator instalacji),
+   - folder portable `dist\Retusz\` (`Retusz.exe` + natywny edytor Rust+wgpu `Retusz-Studio-GPU.exe`).
 4. `requirements.txt` instaluje na Windows `onnxruntime-directml` (GPU przez DirectML, każda karta z DirectX 12);
-   bez GPU silnik sam przechodzi na procesor.
+   natywny silnik `retusz-gpu` używa `wgpu` (DirectX 12 / Vulkan) z automatycznym przejściem na wielowątkowy `rayon` (CPU).
 
 ## B. GitHub Actions (windows-latest)
-Plik `.github/workflows/build-windows.yml` jest gotowy: testy → PyInstaller → test CLI → `Retusz-windows-x64.zip` jako artefakt.
+Plik `.github/workflows/build-windows.yml` uruchamia `cargo test --release` + `cargo build --release` → `pytest` → PyInstaller → smoke test CLI (Python + Rust + transfer AI) → Inno Setup (`Retusz-Setup-x64.exe`) + ZIP (`Retusz-windows-x64.zip`).
 Uruchamia się na tagu `v*` albo ręcznie (Run workflow). Repozytorium: https://github.com/Jack4B/retusz
 
 ## Model AI do pobrania (jednorazowo)

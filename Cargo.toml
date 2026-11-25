@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/retusz-core",
+    "crates/retusz-gpu",
+    "crates/retusz-app",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+authors = ["Jack4B <Jack4B@users.noreply.github.com>"]
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rayon = "1.10"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "webp", "ico"] }
+bytemuck = { version = "1.18", features = ["derive"] }
+wgpu = "23.0"
+pollster = "0.4"
+eframe = { version = "0.30", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"] }
+egui = "0.30"
+rfd = "0.15"
+clap = { version = "4.5", features = ["derive"] }

@@ -246,11 +246,23 @@ class Engine:
         return ra
 
     # ---------- stage 2 ----------
-    def fit(self, src_rgb, ref: RefAnalysis) -> Fit:
+    def fit(self, src_rgb, ref: RefAnalysis | None = None) -> Fit:
         T = {}; t = time.perf_counter()
         s = C.small(src_rgb, ANALYSIS_SIDE); fs, lms = F.pick_faces(s, landmarks=True); ms = F.skin_mask(s, fs)
         S = C.to_lab(s); T["analyse_s"] = time.perf_counter()-t; t = time.perf_counter()
         G, Glab = C.grid_lab(GRID)
+        W = s.shape[1]
+        if ref is None:
+            glob = Glab.astype(np.float32)
+            d = [np.zeros(2, np.float32) for _ in range(3)]
+            vig_diff = np.linspace(0.0, -10.0, 32, dtype=np.float32)
+            fit = Fit(glob, glob, d, [np.asarray(f, np.float32)/W for f in fs], vig_diff, (0.0, 0.0, 0.0), "standalone", T)
+            fit.lms_n = [np.asarray(l, np.float32)/W for l in lms] if len(lms) == len(fs) else None
+            t3 = time.perf_counter()
+            fit.relight = RL.Relight(s, ms, fit.faces_n, self.depth_ai)
+            T["depth_s"] = time.perf_counter()-t3
+            T["prepare_s"] = time.perf_counter()-t
+            return fit
         if self.model:
             if self.model not in ref.embeddings:
                 ref.embeddings[self.model] = MF.embed(ref.fit_rgb, self.model)
@@ -308,20 +320,24 @@ class Engine:
 
     # ---------- stage 3 ----------
     @staticmethod
-    def _bake_one(lab_in, d_zone, zone_amt, skin_protect, p: Params, offset, chroma_lim=1.2, is_skin=False, guard=None, hue_k=None):
-        N = lab_in.shape[0]; _, S = C.grid_lab(N)
-        O = lab_in.copy(); zw = C.zone_w(O[..., 0])
-        if guard is not None: O[..., 1:] = O[..., 1:]@guard[0] + guard[1]
-        if hue_k is not None: O[..., 1:] = _apply_hue_chroma(O[..., 1:], hue_k)
-        for i in range(3): O[..., 1:] += zone_amt*0.7*d_zone[i]*zw[i][..., None]
-        O[..., 0] += offset[0]*np.clip(O[..., 0]/50, 0, 1); O[..., 1] += offset[1]; O[..., 2] += offset[2]
-        if skin_protect: O[..., 1:] -= skin_protect*0.5*(O[..., 1:]-S[..., 1:])
-        Cs = np.hypot(S[..., 1], S[..., 2]); Cg = np.hypot(O[..., 1], O[..., 2])+1e-6
-        f = np.minimum(1, (Cs*chroma_lim+6)/Cg); O[..., 1] *= f; O[..., 2] *= f
-        O[..., 0] = C.rolloff(np.clip(O[..., 0], 0, None)); wf = np.clip((100-O[..., 0])/12, 0, 1); O[..., 1:] *= wf[..., None]**0.5
-        O = S + p.strength*(O-S)
-        rgb = cv2.cvtColor(O.reshape(-1, 1, 3).astype(np.float32), cv2.COLOR_LAB2RGB).reshape(N, N, N, 3)
-        rgb = np.clip(rgb, 0, 1)
+    def _bake_one(lab_in, d_zone, zone_amt, skin_protect, p: Params, offset, chroma_lim=1.2, is_skin=False, guard=None, hue_k=None, standalone=False):
+        N = lab_in.shape[0]
+        if standalone:
+            rgb = C.rgb_grid(N).copy()
+        else:
+            _, S = C.grid_lab(N)
+            O = lab_in.copy(); zw = C.zone_w(O[..., 0])
+            if guard is not None: O[..., 1:] = O[..., 1:]@guard[0] + guard[1]
+            if hue_k is not None: O[..., 1:] = _apply_hue_chroma(O[..., 1:], hue_k)
+            for i in range(3): O[..., 1:] += zone_amt*0.7*d_zone[i]*zw[i][..., None]
+            O[..., 0] += offset[0]*np.clip(O[..., 0]/50, 0, 1); O[..., 1] += offset[1]; O[..., 2] += offset[2]
+            if skin_protect: O[..., 1:] -= skin_protect*0.5*(O[..., 1:]-S[..., 1:])
+            Cs = np.hypot(S[..., 1], S[..., 2]); Cg = np.hypot(O[..., 1], O[..., 2])+1e-6
+            f = np.minimum(1, (Cs*chroma_lim+6)/Cg); O[..., 1] *= f; O[..., 2] *= f
+            O[..., 0] = C.rolloff(np.clip(O[..., 0], 0, None)); wf = np.clip((100-O[..., 0])/12, 0, 1); O[..., 1:] *= wf[..., None]**0.5
+            O = S + p.strength*(O-S)
+            rgb = cv2.cvtColor(O.reshape(-1, 1, 3).astype(np.float32), cv2.COLOR_LAB2RGB).reshape(N, N, N, 3)
+            rgb = np.clip(rgb, 0, 1)
         # Photographic tone & colour edits in linear light + OKLab (work even when strength == 0)
         has_tone = any((p.exposure, p.contrast, p.highlights, p.shadows, p.whites, p.blacks, p.saturation, p.vibrance))
         if has_tone:
@@ -338,11 +354,12 @@ class Engine:
 
     def bake(self, fit: Fit, p: Params):
         cache = getattr(fit, "_lut_cache", None)
-        key = p.colour_key()
+        sa = fit.method == "standalone"
+        key = (p.colour_key(), sa)
         if cache is not None and key in cache: return cache[key]
         o = fit.offset
-        luts = (self._bake_one(fit.glob, fit.d_zone, 1.0, 0, p, o, guard=fit.guard_bg, hue_k=fit.hue_k),
-                self._bake_one(fit.skin, fit.d_zone, 0.3, 0.25, p, (o[0], o[1]*0.5, o[2]*0.5), is_skin=True, guard=fit.guard_skin))
+        luts = (self._bake_one(fit.glob, fit.d_zone, 1.0, 0, p, o, guard=fit.guard_bg, hue_k=fit.hue_k, standalone=sa),
+                self._bake_one(fit.skin, fit.d_zone, 0.3, 0.25, p, (o[0], o[1]*0.5, o[2]*0.5), is_skin=True, guard=fit.guard_skin, standalone=sa))
         if cache is not None:
             if len(cache) > 16: cache.clear()
             cache[key] = luts

@@ -9,13 +9,14 @@ from .engine import geometry as G
 from .reference import Reference
 from .sidecar import Series
 
-def export_one(engine: Engine, reference: Reference, photo, params, out_dir, opts, fit=None):
+def export_one(engine: Engine, reference: Reference | None, photo, params, out_dir, opts, fit=None):
     dst = export.output_path(photo, out_dir, opts)
     if dst.resolve() == Path(photo).resolve():
         raise ValueError("Plik wyjściowy nadpisałby oryginał.")
     rgb, meta = imageio.load(photo)
     if fit is None:
-        fit = engine.fit(rgb, reference.analysis(engine, meta.get("icc_profile")))
+        ra = reference.analysis(engine, meta.get("icc_profile")) if reference is not None else None
+        fit = engine.fit(rgb, ra)
     out, mask_q = engine.render(rgb, fit, params, return_mask=True)
     if params.angle or params.crop is not None:
         out = G.apply(out, params.angle, params.crop)

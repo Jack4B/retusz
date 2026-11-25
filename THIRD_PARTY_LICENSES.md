@@ -16,7 +16,8 @@
 | Little CMS, libjpeg (w pakiecie rawpy) | biblioteki pomocnicze LibRaw | MIT / IJG |
 | tifffile (Christoph Gohlke) | zapis TIFF 16-bit | BSD-3-Clause |
 | Metody (zaimplementowane od nowa, bez kopiowania kodu) | Bilateral Guided Upsampling (Chen i in., SIGGRAPH Asia 2016; kod referencyjny google/bgu – Apache-2.0), ECC (Evangelidis i Psarakis 2008), SIFT / DIS optical flow / GrabCut (Rother, Kolmogorov, Blake 2004; OpenCV, Apache-2.0), CIEDE2000 (Sharma, Wu, Dalal 2005), OKLab i mapowanie gamutu (Björn Ottosson 2020/2021, MIT / domena publiczna), filtr prowadzony i szybki filtr prowadzony 3-kanałowy (He, Sun, Tang 2010; He i Sun 2015), adaptacja chromatyczna Bradford CAT (Lam 1985 / CIE-ICC), interpolacja tetraedryczna LUT 3D (Sakamoto 1974; Kasson i in. 1995) | – |
-| PyInstaller | budowanie .exe | GPL-2.0 z wyjątkiem dla bootloadera (dozwolone dla aplikacji zamkniętych) |
+| Rust (`wgpu`, `eframe`/`egui`, `rayon`, `image`, `serde`, `bytemuck`, `pollster`, `clap`, `rfd`) | natywny silnik GPU/CPU i edytor studyjny `retusz-rs` | MIT / Apache-2.0 |
+| PyInstaller / Inno Setup | budowanie `.exe` oraz instalatora Windows `Retusz-Setup-x64.exe` | GPL-2.0 z wyjątkiem dla bootloadera / Inno Setup License |
 
 Pliki testowe RAW (Nikon D750, D700) pochodzą z https://raw.pixls.us (CC0 1.0) i nie są dołączone do repozytorium.
 

@@ -112,3 +112,25 @@ def test_skin_mask_does_not_depend_on_resolution_with_noisy_raw():
     shadow = cv2.resize((~face).astype(np.uint8), (mp.shape[1], mp.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
     assert abs(float(mf[shadow].mean()) - float(mp[shadow].mean())) < 0.02
     assert abs(float(mf[~shadow].mean()) - float(mp[~shadow].mean())) < 0.05
+
+
+def test_standalone_fit_without_reference_works_and_exports(tmp_path):
+    """Studio editor mode (0.2.0): Engine.fit(src, None) and batch.export_one(e, None, ...) work without a reference."""
+    from PIL import Image
+    from retusz import batch, export
+    src = synth(seed=11)
+    e = Engine(None, "classic", depth_ai=False)
+    fit = e.fit(src, None)
+    assert fit.method == "standalone"
+    # Zero adjustments + no reference -> identity colour
+    out0 = e.render(src, fit, Params(strength=1.0, db=0.0, plastic=0.0, vignette=0.0, skin_even=0.0))
+    assert np.abs(out0.astype(int) - src.astype(int)).max() <= 1
+    # Exposure +0.5 EV brightens the image without needing a reference
+    out_ev = e.render(src, fit, Params(exposure=0.5, db=0.0, plastic=0.0))
+    assert out_ev.mean() > src.mean() + 8.0
+    # Standalone export_one with reference=None
+    ph = tmp_path / "portret.jpg"
+    Image.fromarray(src).save(ph, quality=95)
+    dst = batch.export_one(e, None, ph, Params(exposure=0.25, contrast=0.1), tmp_path / "Retusz", export.ExportOptions())
+    assert dst.exists()
+
