@@ -139,19 +139,23 @@ def changed_map(work, ai_w, valid, scales=CHANGE_SCALES):
 
 def prepare(orig, ai, flow="auto", protect=True, progress=None) -> Prepared:
     """orig: full-resolution RGB (uint8/uint16/float), ai: AI version RGB in the same colour space."""
+    if progress: progress("rejestracja", None)
     al = AL.register(orig, ai, flow=flow)
     if progress: progress("dopasowanie", al)
     ai_w, valid = al.warp_to_work(ai)
     work = AL.to_float(al.work)
+    if progress: progress("mapa_zmian", None)
     changed = changed_map(work, ai_w, valid)
     # Equal pre-blur of both sides: the AI copy has lost the finest detail (resampling, JPEG); fitting a
     # sharp guide to a soft target would read that loss as lower contrast and flatten the result.
+    if progress: progress("siatka", None)
     bw, ba = cv2.GaussianBlur(work, (0, 0), PREFILTER), cv2.GaussianBlur(ai_w, (0, 0), PREFILTER)
     def two_level(w):           # coarse grid (smooth relight + tone curve) as the prior of the fine one
         coarse = bgu.fit(bw, ba, w, cell=COARSE_CELL, sigma_xy=1.0)
         return bgu.fit(bw, ba, w, prior_grid=coarse)
     raw = two_level(valid)
     grid = two_level(valid*(1 - changed)) if protect else raw
+    if progress: progress("gotowe", None)
     return Prepared(al, grid, raw, valid, changed, ai_w, full_wh=(orig.shape[1], orig.shape[0]))
 
 def _mask_rows(mask, y0, y1, W, H):
@@ -159,6 +163,55 @@ def _mask_rows(mask, y0, y1, W, H):
     xs = ((np.arange(W)+0.5)*mw/W - 0.5).astype(np.float32); ys = ((np.arange(y0, y1)+0.5)*mh/H - 0.5).astype(np.float32)
     mx = np.broadcast_to(xs[None, :], (y1-y0, W)).copy(); my = np.broadcast_to(ys[:, None], (y1-y0, W)).copy()
     return cv2.remap(mask.astype(np.float32), mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+
+
+@dataclass
+class PreviewCache:
+    """Pre-sliced preview RGB + CIELAB buffers so slider / brush updates run in ~5-10 ms."""
+    orig_rgb: np.ndarray
+    orig_lab: np.ndarray
+    prot_rgb: np.ndarray
+    prot_lab: np.ndarray
+    raw_rgb: np.ndarray
+    raw_lab: np.ndarray
+
+
+def make_preview_cache(prep: Prepared, prev) -> PreviewCache:
+    """Evaluate both protected and raw BGU grids once on the preview image."""
+    o = AL.to_float(prev); H, W = o.shape[:2]
+    fw, fh = prep.full_wh if prep.full_wh[0] else (W, H)
+    sx, sy = prep.al.sx*fw/W, prep.al.sy*fh/H
+    prot_rgb = np.clip(bgu.slice_(o, prep.grid, sx, sy, y0=0), 0, 1)
+    if prep.grid is prep.grid_raw:
+        raw_rgb = prot_rgb
+    else:
+        raw_rgb = np.clip(bgu.slice_(o, prep.grid_raw, sx, sy, y0=0), 0, 1)
+    orig_lab = to_lab(o)
+    prot_lab = to_lab(prot_rgb)
+    raw_lab = prot_lab if raw_rgb is prot_rgb else to_lab(raw_rgb)
+    return PreviewCache(o, orig_lab, prot_rgb, prot_lab, raw_rgb, raw_lab)
+
+
+def mix_cached(cache: PreviewCache, params: TransferParams, mask=None, out_dtype=np.uint8):
+    """Fast CIELAB colour/luminosity blend using a PreviewCache; matches render() to <= 1/255."""
+    r = cache.prot_rgb if params.protect else cache.raw_rgb
+    k, j = float(params.kolor), float(params.jasnosc)
+    if k >= 0.999 and j >= 0.999 and mask is None:
+        f = r
+    else:
+        Lo = cache.orig_lab
+        Lr = cache.prot_lab if params.protect else cache.raw_lab
+        H, W = Lo.shape[:2]
+        jm = j if mask is None else j*np.clip(_mask_rows(mask, 0, H, W, H), 0, 1)
+        out = Lo.copy()
+        out[..., 0] += jm*(Lr[..., 0] - Lo[..., 0])
+        out[..., 1:] += k*(Lr[..., 1:] - Lo[..., 1:])
+        f = np.clip(cv2.cvtColor(out, cv2.COLOR_Lab2RGB), 0, 1)
+    dt = np.dtype(out_dtype)
+    if dt == np.uint8: return (f*255.0 + 0.5).astype(np.uint8)
+    if dt == np.uint16: return (f*65535.0 + 0.5).astype(np.uint16)
+    return f.astype(dt)
+
 
 def render_float(prep: Prepared, orig, params: TransferParams, mask=None, y0=0, y1=None):
     """Rows y0..y1 of the result as float32 0..1 (at the size of `orig`: full resolution or a preview)."""
