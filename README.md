@@ -27,6 +27,31 @@ dodaje **Plastykę 3D** (światło kierunkowe z mapy głębi) i subtelny **dodge
 - Skóra: dopasowanie barwy a/b (MKL) z ograniczeniem chromy; bezpieczniki kolorów tła i skóry w pętli zamkniętej.
 - Suwak „Pełne barwy” – wygląd jak na monitorze szerokogamutowym bez zarządzania barwą.
 
+## Przenieś grading z AI (0.1.4)
+Gemini, Nano Banana i podobne narzędzia oddają ładnie poprawione światło i kolory, ale w małej rozdzielczości
+i często lekko przycięte, przesunięte albo obrócone. Przycisk **Grading z AI** otwiera okno **Przenieś grading z AI**:
+1. **Oryginał…** – pełna rozdzielczość z aparatu (JPG, TIFF albo NEF), **Wersja AI…** – plik z narzędzia AI.
+2. Retusz sam nakłada wersję AI na oryginał (SIFT + ECC, przy lekkich deformacjach przepływ optyczny);
+   błąd dopasowania jest pokazany w px.
+3. Z wersji AI brana jest tylko barwa i światło (lokalna transformacja koloru, *bilateral guided upsampling*),
+   a szczegóły i ostrość zostają z oryginału – jak warstwa w trybie **Kolor** i częściowo **Jasność** w Photoshopie.
+   - **Kolor** i **Jasność (światło)** – siła przeniesienia barw i nowego światła (0–100%).
+   - **Chroń miejsca zmienione przez AI** – gdzie AI dorysowało lub usunęło treść, zostaje oryginał
+     (**Pokaż mapę zmian** pokazuje te miejsca na czerwono).
+   - **Pędzel jasności** (`B`): Zmniejsz / Przywróć przeniesienie światła w wybranych miejscach.
+   - Widoki: Wynik, Oryginał, AI, **Miganie**, **Podział**.
+4. **Zapisz JPG** albo **Zapisz TIFF 16-bit** – zawsze w pełnym rozmiarze oryginału, z profilem ICC
+   (JPG także z EXIF), do `Retusz\NAZWA_grading-ai.jpg|tif`. Oryginał nie jest zmieniany.
+5. **Seria…** – folder z oryginałami i folder z wersjami AI (może być ten sam); pary są łączone po nazwie
+   (`IMG_0012.jpg` ↔ `IMG_0012_gemini.png`).
+
+Z wiersza poleceń: `python -m retusz transfer ORYGINAL.NEF WERSJA_AI.png [--kolor 100 --jasnosc 70 --tiff]`
+albo `python -m retusz transfer --batch FOLDER_ORYG FOLDER_AI`.
+
+Ograniczenia: brzegi poza kadrem wersji AI dostają ogólny grading; bardzo ostre lokalne maski AI (np. tylko
+twarz) przenoszą się nieco miękcej; w miejscach chronionych zostaje oryginał (bez gradingu z AI); TIFF ma ICC,
+ale bez EXIF.
+
 ## Co umie
 - **Otwórz zdjęcie** albo **Otwórz folder** (seria). **Wzorzec** wybierasz raz dla całego folderu (`retusz-seria.json`).
 - Suwaki: **Siła kolorów**, **Skóra**, **Równanie skóry** (wyrównuje odcień skóry przy mieszanym świetle), **Winieta**,
