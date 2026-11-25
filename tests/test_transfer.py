@@ -126,3 +126,31 @@ def test_smoothed_ai_with_redrawn_fine_detail_is_not_flagged():
     o, _ = portrait_scene(900, 600, seed=2, grain=10)
     ai = cv2.GaussianBlur(regen_fine(cv2.resize(o, (360, 540), interpolation=cv2.INTER_AREA), seed=5), (0, 0), 0.8)
     assert TR.prepare(o, ai).changed_frac < 0.02
+
+
+def test_preview_cache_matches_render_for_all_controls(case):
+    o, gt, ai, T, prep = case
+    prev = cv2.resize(o, (600, 400), interpolation=cv2.INTER_AREA)
+    cache = TR.make_preview_cache(prep, prev)
+    yy, xx = np.mgrid[0:200, 0:300].astype(np.float32)
+    mask = np.clip(xx / 300.0, 0.0, 1.0)
+    for prm, m in (
+        (TR.TransferParams(1.0, 1.0, True), None),
+        (TR.TransferParams(0.65, 0.35, True), None),
+        (TR.TransferParams(0.8, 0.9, False), None),
+        (TR.TransferParams(0.0, 0.0, True), None),
+        (TR.TransferParams(0.9, 0.8, True), mask),
+    ):
+        fast = TR.mix_cached(cache, prm, mask=m)
+        ref = TR.render(prep, prev, prm, mask=m, out_dtype=np.uint8)
+        assert fast.shape == ref.shape and fast.dtype == np.uint8
+        assert int(np.abs(fast.astype(int) - ref.astype(int)).max()) <= 1
+
+
+def test_prepare_reports_progress_stages():
+    o, _ = textured(600, 900, seed=15)
+    ai = cv2.resize(o, (300, 200), interpolation=cv2.INTER_AREA)
+    stages = []
+    TR.prepare(o, ai, progress=lambda s, info=None: stages.append(s))
+    assert stages == ["rejestracja", "dopasowanie", "mapa_zmian", "siatka", "gotowe"]
+

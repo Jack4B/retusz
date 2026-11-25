@@ -92,3 +92,19 @@ def test_plain_affine_ai_stays_affine(scene):
     o, gt = scene
     ai, T = make_ai(gt, 3, 1.5, (7.3, -4.6), 0.06)
     assert not A.register(o, ai).projective
+
+
+def test_full_to_ai_with_flow_handles_large_point_arrays():
+    """full_to_ai must work on full preview grids (> 32767 pts) when optical flow is active."""
+    flow = np.zeros((100, 120, 2), np.float32)
+    flow[..., 0] = 1.5; flow[..., 1] = -0.5
+    al = A.Alignment(M=np.array([[1.0, 0.0, 2.0], [0.0, 1.0, 3.0]], np.float64),
+                     sx=0.1, sy=0.1, work_wh=(120, 100), ai_wh=(120, 100),
+                     flow=flow, residual_px=0.2, ncc=0.9, inliers=50)
+    yy, xx = np.mgrid[0:200, 0:250].astype(np.float32)  # 50 000 pts > SHRT_MAX (32 767)
+    P = np.c_[xx.ravel(), yy.ravel()]
+    out = al.full_to_ai(P)
+    assert out.shape == (50000, 2)
+    expected = al.full_to_work(P[:10]) + np.array([1.5 + 2.0, -0.5 + 3.0])
+    assert np.allclose(out[:10], expected, atol=1e-4)
+

@@ -81,9 +81,15 @@ class Alignment:
     def full_to_ai(self, P):
         Q = self.full_to_work(P)
         if self.flow is not None:
-            fx = cv2.remap(self.flow[..., 0], Q[:, 0:1].astype(np.float32), Q[:, 1:2].astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-            fy = cv2.remap(self.flow[..., 1], Q[:, 0:1].astype(np.float32), Q[:, 1:2].astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-            Q = Q + np.c_[fx.ravel(), fy.ravel()]
+            n = len(Q)
+            df = np.empty((n, 2), np.float32)
+            # OpenCV remap requires dst.rows < SHRT_MAX (32767), so chunk large 1D point lists.
+            for i in range(0, n, 16384):
+                qx = np.ascontiguousarray(Q[i:i+16384, 0:1], np.float32)
+                qy = np.ascontiguousarray(Q[i:i+16384, 1:2], np.float32)
+                df[i:i+16384, 0] = cv2.remap(self.flow[..., 0], qx, qy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE).ravel()
+                df[i:i+16384, 1] = cv2.remap(self.flow[..., 1], qx, qy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE).ravel()
+            Q = Q + df
         return np.c_[apply_map(self.M, Q[:, 0], Q[:, 1])]
 
     def maps(self):
