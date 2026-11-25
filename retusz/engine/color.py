@@ -145,3 +145,46 @@ def swd(a, b, n=64, seed=0):
         v = rng.normal(size=3); v /= np.linalg.norm(v)
         d.append(np.abs(np.quantile(A@v, q)-np.quantile(B@v, q)).mean())
     return float(np.mean(d))
+
+def guided_refine_rgb(I, p, r, eps=1e-3):
+    """3-channel colour guided filter (He, Sun, Tang, ECCV 2010 / TPAMI 2013, eq. 14-16).
+    I: float32 HxWx3 in 0..1, p: float32 HxW. Snaps p's edges to both luminance and chroma edges of I."""
+    r = max(1, int(r)); k = (2*r + 1, 2*r + 1)
+    box = lambda x: cv2.boxFilter(x, -1, k)
+    R, G, B = I[..., 0], I[..., 1], I[..., 2]
+    mR, mG, mB, mp = box(R), box(G), box(B), box(p)
+    vrr = box(R*R) - mR*mR + eps; vrg = box(R*G) - mR*mG; vrb = box(R*B) - mR*mB
+    vgg = box(G*G) - mG*mG + eps; vgb = box(G*B) - mG*mB; vbb = box(B*B) - mB*mB + eps
+    crp = box(R*p) - mR*mp; cgp = box(G*p) - mG*mp; cbp = box(B*p) - mB*mp
+    c00 = vgg*vbb - vgb*vgb; c01 = vrb*vgb - vrg*vbb; c02 = vrg*vgb - vrb*vgg
+    c11 = vrr*vbb - vrb*vrb; c12 = vrg*vrb - vrr*vgb; c22 = vrr*vgg - vrg*vrg
+    inv = 1.0/(vrr*c00 + vrg*c01 + vrb*c02 + 1e-12)
+    aR = (c00*crp + c01*cgp + c02*cbp)*inv
+    aG = (c01*crp + c11*cgp + c12*cbp)*inv
+    aB = (c02*crp + c12*cgp + c22*cbp)*inv
+    b = mp - aR*mR - aG*mG - aB*mB
+    return (box(aR)*R + box(aG)*G + box(aB)*B + box(b)).astype(np.float32)
+
+def fast_guided_rgb(I, p, r, eps=1e-3, s=4.0):
+    """Fast 3-channel guided filter (He & Sun 2015): linear coefficients at 1/s resolution, applied at full-res."""
+    h, w = p.shape
+    if s <= 1.05: return guided_refine_rgb(I, p, r, eps)
+    sw, sh = max(2, round(w/s)), max(2, round(h/s)); rs = max(1, round(r/s)); k = (2*rs + 1, 2*rs + 1)
+    box = lambda x: cv2.boxFilter(x, -1, k)
+    Is = cv2.resize(I, (sw, sh), interpolation=cv2.INTER_AREA)
+    ps = cv2.resize(p, (sw, sh), interpolation=cv2.INTER_AREA)
+    R, G, B = Is[..., 0], Is[..., 1], Is[..., 2]
+    mR, mG, mB, mp = box(R), box(G), box(B), box(ps)
+    vrr = box(R*R) - mR*mR + eps; vrg = box(R*G) - mR*mG; vrb = box(R*B) - mR*mB
+    vgg = box(G*G) - mG*mG + eps; vgb = box(G*B) - mG*mB; vbb = box(B*B) - mB*mB + eps
+    crp = box(R*ps) - mR*mp; cgp = box(G*ps) - mG*mp; cbp = box(B*ps) - mB*mp
+    c00 = vgg*vbb - vgb*vgb; c01 = vrb*vgb - vrg*vbb; c02 = vrg*vgb - vrb*vgg
+    c11 = vrr*vbb - vrb*vrb; c12 = vrg*vrb - vrr*vgb; c22 = vrr*vgg - vrg*vrg
+    inv = 1.0/(vrr*c00 + vrg*c01 + vrb*c02 + 1e-12)
+    aR = box((c00*crp + c01*cgp + c02*cbp)*inv)
+    aG = box((c01*crp + c11*cgp + c12*cbp)*inv)
+    aB = box((c02*crp + c12*cgp + c22*cbp)*inv)
+    b = box(mp - aR*mR - aG*mG - aB*mB)
+    up = lambda x: cv2.resize(x, (w, h), interpolation=cv2.INTER_LINEAR)
+    return (up(aR)*I[..., 0] + up(aG)*I[..., 1] + up(aB)*I[..., 2] + up(b)).astype(np.float32)
+

@@ -77,8 +77,9 @@ def apply_dnb(case, s, algo):
 
 def apply_plastic(rgb, case, s, old, angle=120.0):
     H, W = rgb.shape[:2]; qh, qw = max(2, H//4), max(2, W//4)
-    Lq = Lstar(cv2.resize(rgb, (qw, qh), interpolation=cv2.INTER_AREA))
-    g = relight_gain_v1(case["rl"], case["skin_a"], qh, qw, Lq, s, angle) if old else case["rl"].gain(qh, qw, Lq, s, angle)
+    rgb_q = cv2.resize(rgb, (qw, qh), interpolation=cv2.INTER_AREA)
+    Lq = Lstar(rgb_q)
+    g = relight_gain_v1(case["rl"], case["skin_a"], qh, qw, Lq, s, angle) if old else case["rl"].gain(qh, qw, Lq, s, angle, rgb_q=rgb_q)
     up = R._bilinear_up(g.astype(np.float32), H, W)[..., None]
     return np.clip(rgb.astype(np.float32)*(1 + up) + 0.5, 0, 255).astype(np.uint8)
 
