@@ -46,3 +46,8 @@ def test_flow_corrects_local_drift(scene):
         P = np.c_[xs.ravel(), ys.ravel()]
         return float(np.linalg.norm(true_map(P) - al.full_to_ai(P), axis=1).mean()*3)
     assert err(local) < 0.6 and err(local) < 0.5*err(rigid), (err(local), err(rigid))
+
+def test_auto_flow_only_when_it_helps(scene):
+    o, gt = scene
+    ai, T = make_ai(gt, 3, 1.0, (0, 0), 0.05)
+    assert A.register(o, ai, flow="auto").flow is None

@@ -126,22 +126,42 @@ def _blur_axis(S, axis, sigma):
         out += kv*np.take(P, np.arange(i, i+n), axis=axis)
     return out
 
-def _solve(XX, XY, lam, prior, mu=1e-7):
-    """Ridge per cell: (XX + lam*N*D + mu*I) A = XY + (lam*N*D + mu*I) prior, D = diag(1,1,1,0)."""
+MISS_VAR = 0.01         # colour variance assumed for "virtual" prior samples
+
+def _solve(XX, XY, lam, prior, missing=None, mu=1e-7):
+    """Ridge per cell: (XX + R) A = XY + R prior with R = lam*N*diag(1,1,1,0) + mu*I, plus, where pixels were
+    weighted out (missing evidence), virtual samples of the prior: missing*diag(v,v,v,1). Without them a
+    cell that only sees the rim of an excluded area would extrapolate the rim's transform into it."""
     N = XX[..., 3, 3]
     D = np.diag([1.0, 1.0, 1.0, 0.0])
     R = lam*N[..., None, None]*D + mu*np.eye(4)
-    P = prior.T                                             # (4, 3)
+    if missing is not None:
+        R = R + missing[..., None, None]*np.diag([MISS_VAR, MISS_VAR, MISS_VAR, 1.0])
+    P = np.swapaxes(prior, -1, -2)                          # (4, 3) or per cell (..., 4, 3)
     return np.linalg.solve(XX + R, XY + R @ P)              # (..., 4, 3)
 
-def fit(guide, target, weight=None, cell=8.0, bins=8, lam=1e-4, sigma_xy=1.0, sigma_z=0.7, use_numba=None) -> Grid:
-    """guide/target: float32 HxWx3 in 0..1 at the same (work) resolution; weight HxW in 0..1."""
+def sample_nodes(grid: Grid, gh, gw, cell):
+    """A coarser grid's matrices at the nodes of a finer grid (bilinear in x, y; same luminance bins)."""
+    ys = np.clip(np.arange(gh)*cell/grid.cell, 0, grid.A.shape[0]-1); xs = np.clip(np.arange(gw)*cell/grid.cell, 0, grid.A.shape[1]-1)
+    y0 = np.minimum(ys.astype(int), max(grid.A.shape[0]-2, 0)); x0 = np.minimum(xs.astype(int), max(grid.A.shape[1]-2, 0))
+    fy = (ys-y0)[:, None, None, None, None]; fx = (xs-x0)[None, :, None, None, None]
+    y1 = np.minimum(y0+1, grid.A.shape[0]-1); x1 = np.minimum(x0+1, grid.A.shape[1]-1)
+    A = grid.A
+    return ((A[y0][:, x0]*(1-fx) + A[y0][:, x1]*fx)*(1-fy) + (A[y1][:, x0]*(1-fx) + A[y1][:, x1]*fx)*fy).astype(np.float64)
+
+def fit(guide, target, weight=None, cell=8.0, bins=8, lam=1e-4, sigma_xy=1.0, sigma_z=0.7, use_numba=None, prior_grid=None) -> Grid:
+    """guide/target: float32 HxWx3 in 0..1 at the same (work) resolution; weight HxW in 0..1.
+    prior_grid: a coarser fit used as the per-cell ridge target (where data is thin or missing)."""
     g = np.ascontiguousarray(guide, np.float32); t = np.ascontiguousarray(target, np.float32)
     h, wd = g.shape[:2]
     w = np.ones((h, wd), np.float32) if weight is None else np.ascontiguousarray(weight, np.float32)
     gh, gw = int(np.ceil((h-1)/cell))+1, int(np.ceil((wd-1)/cell))+1
     use = HAVE_NUMBA if use_numba is None else (use_numba and HAVE_NUMBA)
-    S = _splat_nb(g, t, w, float(cell), int(bins), gh, gw) if use else _splat_numpy(g, t, w, cell, bins, gh, gw)
+    splat = (lambda ww: _splat_nb(g, t, ww, float(cell), int(bins), gh, gw)) if use else (lambda ww: _splat_numpy(g, t, ww, cell, bins, gh, gw))
+    S = splat(w)
+    Nall = None
+    if weight is not None and float(w.min()) < 1.0:
+        Nall = splat(np.ones_like(w))[..., 15:16]           # pixel counts with every weight = 1
     tot = S.reshape(-1, 28).sum(0)
     XXg, XYg = tot[:16].reshape(4, 4), tot[16:].reshape(4, 3)
     if XXg[3, 3] <= 0:
@@ -149,9 +169,12 @@ def fit(guide, target, weight=None, cell=8.0, bins=8, lam=1e-4, sigma_xy=1.0, si
     else:
         ridge = 1e-6*XXg[3, 3]*np.diag([1.0, 1.0, 1.0, 0.0])
         prior = np.linalg.solve(XXg + ridge + 1e-9*np.eye(4), XYg + ridge @ np.vstack([np.eye(3), np.zeros((1, 3))])).T
-    for ax, s in ((0, sigma_xy), (1, sigma_xy), (2, sigma_z)): S = _blur_axis(S, ax, s)
+    for ax, s in ((0, sigma_xy), (1, sigma_xy), (2, sigma_z)):
+        S = _blur_axis(S, ax, s)
+        if Nall is not None: Nall = _blur_axis(Nall, ax, s)
     XX = S[..., :16].reshape(gh, gw, bins, 4, 4); XY = S[..., 16:].reshape(gh, gw, bins, 4, 3)
-    A = _solve(XX, XY, lam, prior)
+    missing = None if Nall is None else np.maximum(Nall[..., 0] - XX[..., 3, 3], 0)
+    A = _solve(XX, XY, lam, prior if prior_grid is None else sample_nodes(prior_grid, gh, gw, cell), missing)
     return Grid(np.ascontiguousarray(np.swapaxes(A, -1, -2), np.float32), float(cell), prior.astype(np.float32))
 
 def _slice_numpy(img, A, inv_cell, sx, sy, y0f):

@@ -161,9 +161,12 @@ def register(orig, ai, flow=False, orig_small=None) -> Alignment:
     if cc < 0.2:
         raise AlignmentError("Wersja AI nie pasuje do oryginału (niska korelacja po dopasowaniu).")
     wi, valid = al.warp_to_work(i)
-    if flow:
-        al.flow = _flow(t, wi, valid)
-        wi, valid = al.warp_to_work(i)
     al.residual_px = _residual(t, wi, valid)/np.sqrt(sx*sy)
+    if flow:                               # True, or "auto": keep the flow only if it clearly helps
+        al.flow = _flow(t, wi, valid)
+        wf, vf = al.warp_to_work(i)
+        r = _residual(t, wf, vf)/np.sqrt(sx*sy)
+        if flow == "auto" and not (r < 0.8*al.residual_px and al.residual_px > 0.25): al.flow = None
+        else: al.residual_px = r
     al.work = work
     return al
