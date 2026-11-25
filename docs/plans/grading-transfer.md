@@ -109,3 +109,21 @@ python -m pytest -q                                     # whole suite
 python tools/quality_gate.py --transfer /tmp/tg [photo.jpg|photo.NEF ...]   # transfer gate + sheets
 python -m retusz transfer oryginal.NEF wersja_ai.png --out wynik.jpg
 ```
+
+## Gate results (box, 2026-11-25)
+`python tools/quality_gate.py --transfer OUT photo_a.jpg photo_b.jpg _GDN0443.NEF` (private photos stay outside the repo).
+
+| source | align px | ΔE mean | sharp (detail slope) | halo ΔE | identity ΔE | removed-object ΔE |
+|---|---|---|---|---|---|---|
+| synthetic 4500×3000 | 0.005–0.14 | 0.32–0.49 | 0.98–0.99 | 0.40–0.61 | 0.0 | 2.21 |
+| photo_a 6016×4016 | 0.03–0.25 | 0.48–0.63 | 1.01 | 0.88–1.13 | 0.0 | 3.74 |
+| photo_b 2496×1696 | 0.04–0.30 | 0.57–0.71 | 0.97–1.00 | 0.77–0.98 | 0.0 | 1.87 |
+| NEF 4284×2844 (noisy, public sample) | 0.02–0.33 | 0.69–1.19 | **0.939–0.967** | 0.89–1.48 | 0.0 | 2.32 |
+
+Naive AI upscale scores 0.001–0.24 on the same sharpness metric.
+
+Open: on the noisy NEF the result keeps all of the original's detail (it is a per-pixel affine colour transform
+of the original) but its finest-scale gain is ~6% below the ground truth's pointwise tone curve. An oracle that
+fits the same model to the *full-resolution* GT reaches only 0.937 (prefilter 9 px) – 0.978 (no prefilter),
+so the gap is information the low-resolution AI copy does not carry. Tried without effect: prefilter 2–5,
+lam 1e-6, 20 bins, σ_z 0.4, σ_xy 0.5, low-resolution GT mask, blurred bin selection, band-limited detail gain.
