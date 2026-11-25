@@ -1,6 +1,14 @@
 # HANDOFF – Dodge & Burn v2 (branch feature/dnb-v2)
 
-## Where it stopped
+## Status 0.1.6 (done)
+D&B v2 (`retusz/engine/dnb.py`, guided-filter base) and the Plastyka 3D halo fix are in; `quality_gate.py --dnb`
+PASS on synthetic portraits (numbers: docs/plans/dnb-v2-research.md, "Measured"). Open:
+- run `python tools/quality_gate.py --dnb OUT photo…` on real portraits on the PC (glasses, beard, several faces,
+  low key, dark skin) and look at the sheets; thresholds are in `tools/dnb_gate.THRESH`;
+- Plastyka 3D still trusts the depth model about what is the subject: a background patch the model reads as near
+  *and* connected to the head is sculpted (one small smudge on the synthetic 4500×3000 case, halo_out 0.33 < 1).
+
+## Where it stopped (before 0.1.6)
 - Done: v1 failure modes reproduced on box portraits (D&B alone at 0/25/50/75/100 %), root causes traced,
   plan `docs/plans/2026-11-25-dnb-v2.md`, study `docs/plans/dnb-v2-research.md`.
 - Baseline: `python -m pytest -q` → 111 passed (main 9c6c3b6).
