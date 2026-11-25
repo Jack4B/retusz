@@ -37,3 +37,34 @@ def main(argv=None):
     for ph, _, e in errs: print("BŁĄD", ph, e)
     print(f"Zapisano {len(res)-len(errs)} w {out} ({time.perf_counter()-t:.1f} s)")
     return 1 if errs else 0
+
+def transfer_main(argv=None):
+    """python -m retusz transfer ORYGINAL WERSJA_AI [--out PLIK] | --batch FOLDER_ORYG FOLDER_AI --out FOLDER"""
+    _utf8_console()
+    from . import grading as GR
+    from .engine.transfer import TransferParams
+    from .engine.align import AlignmentError
+    ap = argparse.ArgumentParser(prog="retusz transfer", description="Przenieś grading z wersji AI na pełny oryginał")
+    ap.add_argument("orig"); ap.add_argument("ai"); ap.add_argument("--out")
+    ap.add_argument("--batch", action="store_true", help="orig i ai to foldery; pary po nazwach plików")
+    ap.add_argument("--kolor", type=float, default=100); ap.add_argument("--jasnosc", type=float, default=100)
+    ap.add_argument("--no-protect", action="store_true", help="nie chroń miejsc zmienionych przez AI")
+    ap.add_argument("--tiff", action="store_true", help="TIFF 16-bit zamiast JPG"); ap.add_argument("--quality", type=int, default=95)
+    ap.add_argument("--flow", choices=["auto", "on", "off"], default="auto")
+    a = ap.parse_args(argv)
+    prm = TransferParams(kolor=a.kolor/100, jasnosc=a.jasnosc/100, protect=not a.no_protect)
+    fmt = "tif" if a.tiff else "jpg"
+    def show(r): return (f"dopasowanie {r['align_px']:.2f} px, skala {r['scale']:.3f}, zmienione przez AI {r['changed']*100:.1f}%, "
+                         f"pokrycie {r['coverage']*100:.0f}%, {r['size'][0]}×{r['size'][1]}, {r['seconds']:.1f} s")
+    if a.batch:
+        pairs = GR.pair_files(a.orig, a.ai)
+        if not pairs: print("Nie znaleziono par (oryginał + wersja AI o tej samej nazwie)."); return 1
+        out = Path(a.out) if a.out else Path(a.orig) / "Retusz"
+        res = GR.batch(pairs, out, prm, fmt, a.quality, progress=lambda i, n, o, r, e: print(f"{i}/{n} {Path(o).name}: " + (show(r) if r else "BŁĄD " + e)))
+        return 1 if any(e for _, _, e in res) else 0
+    out = Path(a.out) if a.out else GR.default_out(a.orig, fmt)
+    try:
+        r = GR.run(a.orig, a.ai, out, prm, quality=a.quality, flow={"on": True, "off": False}.get(a.flow, "auto"))
+    except (AlignmentError, ValueError) as e:
+        print("BŁĄD:", e); return 1
+    print("Zapisano", out, "·", show(r)); return 0

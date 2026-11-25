@@ -175,3 +175,12 @@ def image_size(path):
     with _rawpy().imread(str(path)) as r:
         s = r.sizes; w, h = s.width, s.height
         return (h, w) if s.flip in (5, 6) else (w, h)
+
+@lru_cache(maxsize=8)
+def _tone_lut16(gain):
+    return (encode(shoulder(np.arange(65536, dtype=np.float32)*np.float32(gain/65535)))*65535 + 0.5).astype(np.uint16)
+
+def load16(path):
+    """Same develop as load(), kept at 16 bit (for the AI grading transfer / 16-bit TIFF output)."""
+    a16 = _decode16(path)
+    return np.ascontiguousarray(_tone_lut16(round(float(exposure_gain(path, a16)), 6))[a16]), _meta(path)
