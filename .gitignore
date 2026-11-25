@@ -13,3 +13,5 @@ retusz-seria.json
 .coverage
 private-tests/
 .private/
+target/
+

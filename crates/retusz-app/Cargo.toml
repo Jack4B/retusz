@@ -1,0 +1,23 @@
+[package]
+name = "retusz-app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "retusz-rs"
+path = "src/main.rs"
+
+[dependencies]
+retusz-core = { path = "../retusz-core" }
+retusz-gpu = { path = "../retusz-gpu" }
+serde.workspace = true
+serde_json.workspace = true
+image.workspace = true
+wgpu.workspace = true
+eframe.workspace = true
+egui.workspace = true
+rfd.workspace = true
+clap.workspace = true
+

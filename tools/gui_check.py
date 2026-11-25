@@ -55,10 +55,19 @@ def script():
     app.redo(); pump(2)
     if abs(app.params.exposure) > 1e-4: print("REDO FAILED", app.params.exposure); ok = False
     app.toggle_before(True); pump(3); app.toggle_before(False); pump(2)
-    # Switch to second slider tab ("Wzorzec i Portret") and check stability + capture screenshot
-    app.slider_tabs.set("Wzorzec i Portret"); app._slider_tab("Wzorzec i Portret"); pump(4)
+    # Switch to second slider tab ("Portret i Plastyka") and third ("▸ Wzorzec (AI)") and check stability
+    app.slider_tabs.set("Portret i Plastyka"); app._slider_tab("Portret i Plastyka"); pump(4)
     grab("10b_wzorzec_portret.png")
     if geom() != g0: print("LAYOUT CHANGED by slider tab"); ok = False
+    app.slider_tabs.set("▸ Wzorzec (AI)"); app._slider_tab("▸ Wzorzec (AI)"); pump(4)
+    grab("10c_wzorzec_bonus.png")
+    if geom() != g0: print("LAYOUT CHANGED by reference bonus tab"); ok = False
+    # Test Preset application + undo
+    app.apply_preset_by_name("Ciepły złoty"); pump(3)
+    if abs(app.params.exposure - 0.15) > 1e-4: print("PRESET APPLY FAILED"); ok = False
+    app.undo(); pump(3)
+    if geom() != g0: print("LAYOUT CHANGED by preset"); ok = False
+    app.slider_tabs.set("Portret i Plastyka"); app._slider_tab("Portret i Plastyka"); pump(3)
     app.light_auto.deselect(); app._light_auto()
     for a in range(0, 360, 15):
         app.light.set(a); app._light(a); pump(2)
@@ -127,7 +136,7 @@ def new_features():
     r0 = app.result; cx, cy = canvas_xy(v, (x+0.5)/w, (y+0.5)/h); app._brush_press(ev(cx, cy))
     t0 = time.time()
     while app.result is r0 and time.time()-t0 < 30: app.update(); time.sleep(0.05)
-    pump(5); px, py = app._last_pick
+    wait_render(); px, py = app._last_pick
     d2 = WB.solve(app.frame[max(0, py-3):py+4, max(0, px-3):px+4])
     print(f"eyedropper at {px},{py} (local sd {locsd[y, x]:.1f}) -> temp {app.params.temp:+.3f} tint {app.params.tint:+.3f}; residual correction {d2}")
     if d2 is None or max(abs(d2[0]), abs(d2[1])) > 0.02: ok = False
