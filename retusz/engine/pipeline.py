@@ -44,7 +44,12 @@ class Params:
     bg_exposure: float = 0.0        # 'Separacja tła 3D' -1..1 (3D background exposure offset)
     saturation: float = 0.0         # 'Nasycenie' -1..1
     vibrance: float = 0.0           # 'Jaskrawość' -1..1 (OKLab, boosts dull colours, spares skin)
+    shadow_tone: float = 0.0        # 'Ciepło cieni' -1..1 (OKLab Split Toning: cool blue <-> warm amber shadows)
+    highlight_tone: float = 0.0     # 'Blask świateł' -1..1 (OKLab Split Toning: cool <-> golden hour highlights)
+    hsl_green: float = 0.0          # 'Zieleń (Plener)' -1..1 (OKLCh selective foliage green control, spares skin)
+    hsl_blue: float = 0.0           # 'Błękit (Niebo/Koszule)' -1..1 (OKLCh selective blue cast/sky control, spares skin)
     skin_even: float = 0.3          # 'Równanie skóry' 0..1 (chromophore hemoglobin/melanin + mixed-light evening)
+    mixed_light: float = 0.0        # 'Światło mieszane (LED)' 0..1 (Dual-illuminant split-face white/red unification in OKLab)
     skin_cast: float = 0.0          # 'Czysta skóra' 0..1 (OKLCh skin-locus cast reduction)
     skin_hue: float = 0.0           # 'Odcień skóry' -1..1 (OKLCh skin hue angle rotation: - = Róż/Czerwień, + = Złoty/Żółty)
     deshine: float = 0.0            # 'Redukcja połysku' 0..1 (Dichromatic SUV skin specular removal)
@@ -72,12 +77,12 @@ class Params:
         p = cls(**{k: v for k, v in (d or {}).items() if k in names})
         if p.light_angle is not None: p.light_angle = float(p.light_angle) % 360
         p.exposure = float(np.clip(p.exposure, -2.0, 2.0))
-        for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even", "skin_cast",
+        for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even", "mixed_light", "skin_cast",
                   "deshine", "blemish", "eyes_teeth", "mask_protect", "sharpen_amount", "denoise", "wide"):
             setattr(p, k, float(np.clip(getattr(p, k), 0, 1)))
         for k in ("contrast", "brightness", "dehaze", "texture", "shadows", "highlights", "whites", "blacks",
-                  "clarity", "saturation", "vibrance", "skin_hue", "mask_hue_tol", "temp", "tint",
-                  "light_x", "light_y", "bg_exposure"):
+                  "clarity", "saturation", "vibrance", "shadow_tone", "highlight_tone", "hsl_green", "hsl_blue",
+                  "skin_hue", "mask_hue_tol", "temp", "tint", "light_x", "light_y", "bg_exposure"):
             setattr(p, k, float(np.clip(getattr(p, k), -1, 1)))
         if p.sharpen_mode not in DET.SHARPEN_MODES: p.sharpen_mode = "portrait"
         p.rating = int(np.clip(int(p.rating or 0), 0, 5))
@@ -92,7 +97,8 @@ class Params:
     def colour_key(self):
         return tuple(round(getattr(self, k), 3) for k in (
             "strength", "exposure", "contrast", "brightness", "dehaze", "shadows", "highlights", "whites", "blacks",
-            "saturation", "vibrance", "skin_cast", "skin_hue", "wide", "temp", "tint"))
+            "saturation", "vibrance", "shadow_tone", "highlight_tone", "hsl_green", "hsl_blue",
+            "skin_cast", "skin_hue", "wide", "temp", "tint"))
 
 @dataclass
 class RefAnalysis:
@@ -408,8 +414,9 @@ class Engine:
             rgb = cv2.cvtColor(O.reshape(-1, 1, 3).astype(np.float32), cv2.COLOR_LAB2RGB).reshape(N, N, N, 3)
             rgb = np.clip(rgb, 0, 1)
         # Photographic tone & colour edits in linear light + OKLab (work even when strength == 0)
+        has_grading = any((p.shadow_tone, p.highlight_tone, p.hsl_green, p.hsl_blue))
         has_tone = any((p.exposure, p.contrast, p.brightness, p.dehaze, p.highlights, p.shadows, p.whites, p.blacks,
-                        p.saturation, p.vibrance, is_skin and (p.skin_cast or p.skin_hue)))
+                        p.saturation, p.vibrance, has_grading, is_skin and (p.skin_cast or p.skin_hue)))
         if has_tone:
             lin = TN.srgb_to_lin(rgb)
             if p.exposure: lin = TN.apply_exposure_lin(lin, p.exposure)
@@ -418,6 +425,9 @@ class Engine:
                                         brightness=p.brightness, dehaze=p.dehaze)
             if is_skin and (p.skin_cast or p.skin_hue):
                 lin = TN.apply_skin_oklch(lin, p.skin_cast, p.skin_hue)
+            if has_grading:
+                lin = TN.apply_color_grading_oklab(lin, shadow_tone=p.shadow_tone, highlight_tone=p.highlight_tone,
+                                                   hsl_green=p.hsl_green, hsl_blue=p.hsl_blue, is_skin=is_skin)
             if p.saturation or p.vibrance:
                 lin = TN.apply_color_oklab(lin, p.saturation, p.vibrance, is_skin=is_skin)
             rgb = TN.lin_to_srgb(lin)
@@ -447,22 +457,29 @@ class Engine:
         lut_bg, lut_sk = self.bake(fit, p)
         q = cv2.resize(src, (qw, qh), interpolation=cv2.INTER_AREA)
         subj = fit.relight.fg if (fit.relight is not None and getattr(fit.relight, "fg", None) is not None) else None
+        lms_n = getattr(fit, "lms_n", None)
         mq_raw = skin_mask_fixed(src, fit.faces_n, qh, qw, subject=subj,
                                  hue_tol=p.mask_hue_tol, protect_features=p.mask_protect,
-                                 lms_n=getattr(fit, "lms_n", None))
-        skin_w = max(p.skin, 1.0 if (p.skin_cast > 0 or abs(p.skin_hue) > 1e-4) else 0.0)
+                                 lms_n=lms_n)
+        lms_q = [np.asarray(l, np.float32) * qw for l in lms_n] if lms_n else None
+        if p.mixed_light > 1e-4 and fit.faces_n:
+            mq_raw = SP.mixed_light_face_mask(q, mq_raw, [f*qw for f in fit.faces_n], lms_q=lms_q)
+        skin_w = max(p.skin, 1.0 if (p.skin_cast > 0 or abs(p.skin_hue) > 1e-4 or p.mixed_light > 1e-4) else 0.0)
         mq = mq_raw*skin_w
         gain = np.zeros((qh, qw, 3), np.float32)
         need_vig = p.vignette > 0 and np.any(fit.vig_diff < 0)
         need_3d = p.plastic > 0 and fit.relight is not None
         need_bg = abs(p.bg_exposure) > 1e-4 and fit.relight is not None
+        need_mixed = p.mixed_light > 1e-4 and (fit.faces_n or mq_raw.max() > 0.25)
         need_even = p.skin_even > 0 and fit.faces_n and mq_raw.max() > 0.3
         need_deshine = p.deshine > 0 and mq_raw.max() > 0.25
         need_clarity = abs(p.clarity) > 1e-4
-        if need_vig or need_3d or need_bg or need_even or need_deshine or need_clarity:
+        if need_vig or need_3d or need_bg or need_mixed or need_even or need_deshine or need_clarity:
             base_q = R.render(q, lut_bg, lut_sk, mq, gain); lab_q = C.to_lab(base_q); Lq = lab_q[..., 0]
+        if need_mixed:
+            gain += SP.mixed_light_gain(base_q, mq_raw, [f*qw for f in fit.faces_n], p.mixed_light, lms_q=lms_q)
         if need_even:
-            gain += skin_even_gain(base_q, lab_q, mq_raw, [f*qw for f in fit.faces_n], p.skin_even)
+            gain += skin_even_gain(base_q, lab_q, mq_raw, [f*qw for f in fit.faces_n], p.skin_even * (1.0 - 0.55 * p.mixed_light))
         if need_deshine:
             gain += SP.deshine_gain(base_q, mq_raw, p.deshine)
         if need_3d:

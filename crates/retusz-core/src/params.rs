@@ -25,6 +25,8 @@ pub struct Params {
     #[serde(default)]
     pub skin_even: f32,
     #[serde(default)]
+    pub mixed_light: f32,    //  0.0 .. +1.0 ('Światło mieszane (LED)' Dual-Illuminant split-face unification)
+    #[serde(default)]
     pub skin_cast: f32,      //  0.0 .. +1.0 ('Czysta skóra' OKLCh cast reduction)
     #[serde(default)]
     pub skin_hue: f32,       // -1.0 .. +1.0 ('Odcień skóry' OKLCh hue rotation)
@@ -69,6 +71,14 @@ pub struct Params {
     #[serde(default)]
     pub saturation: f32,     // -1.0 .. +1.0
     #[serde(default)]
+    pub shadow_tone: f32,    // -1.0 .. +1.0 ('Ciepło cieni' OKLab Split Toning)
+    #[serde(default)]
+    pub highlight_tone: f32, // -1.0 .. +1.0 ('Blask świateł' OKLab Split Toning)
+    #[serde(default)]
+    pub hsl_green: f32,      // -1.0 .. +1.0 ('Zieleń (Plener)' OKLCh HSL)
+    #[serde(default)]
+    pub hsl_blue: f32,       // -1.0 .. +1.0 ('Błękit (Niebo/Koszule)' OKLCh HSL)
+    #[serde(default)]
     pub vignette: f32,       // -1.0 .. +1.0
     #[serde(default = "default_dnb", alias = "dnb")]
     pub db: f32,             //  0.0 .. +1.0
@@ -108,6 +118,7 @@ impl Default for Params {
             strength: 1.0,
             skin: 1.0,
             skin_even: 0.0,
+            mixed_light: 0.0,
             skin_cast: 0.0,
             skin_hue: 0.0,
             deshine: 0.0,
@@ -130,6 +141,10 @@ impl Default for Params {
             denoise: 0.0,
             vibrance: 0.0,
             saturation: 0.0,
+            shadow_tone: 0.0,
+            highlight_tone: 0.0,
+            hsl_green: 0.0,
+            hsl_blue: 0.0,
             vignette: 0.0,
             db: 0.40,
             plastic: 0.30,

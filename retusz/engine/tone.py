@@ -204,6 +204,157 @@ def apply_skin_oklch(lin, skin_cast: float = 0.0, skin_hue: float = 0.0):
     return oklab_to_lin_gamut(ok_out)
 
 
+def apply_color_grading_oklab(lin, shadow_tone: float = 0.0, highlight_tone: float = 0.0,
+                              hsl_green: float = 0.0, hsl_blue: float = 0.0, is_skin: bool = False):
+    """Perceptual OKLab Split Toning (shadow_tone, highlight_tone) + Selective OKLCh HSL Mixer
+    (hsl_green for outdoor foliage, hsl_blue for sky/white-shirt blue cast) with strict skin-locus isolation."""
+    if not (shadow_tone or highlight_tone or hsl_green or hsl_blue):
+        return np.asarray(lin, np.float32)
+    ok = lin_to_oklab(np.clip(lin, 0.0, 1.0))
+    L = np.clip(ok[..., 0], 0.0, 1.0).copy()
+    a = ok[..., 1].copy()
+    b = ok[..., 2].copy()
+
+    if hsl_green or hsl_blue:
+        C = np.hypot(a, b)
+        h = np.arctan2(b, a)
+        h_deg = np.degrees(h) % 360.0
+        dh_skin = np.abs(((h_deg - 50.0 + 180.0) % 360.0) - 180.0)
+        w_not_skin = np.float32(0.0) if is_skin else (1.0 - np.exp(-((dh_skin / 32.0) ** 4))).astype(np.float32)
+
+        if hsl_green:
+            hg = float(np.clip(hsl_green, -1.0, 1.0))
+            dh_g = ((h_deg - 132.0 + 180.0) % 360.0) - 180.0
+            w_g = (np.exp(-((dh_g / 36.0) ** 2)) * np.clip(C / 0.022, 0.0, 1.0) * w_not_skin).astype(np.float32)
+            # Negative = noble editorial sage/emerald (lower chroma, slightly deeper L, shift toward emerald)
+            c_mult_g = np.clip(1.0 + (0.48 * hg if hg < 0 else 0.42 * hg) * w_g, 0.25, 1.65)
+            h_shift_g = np.radians(-10.0 * hg) * w_g
+            L = np.clip(L + np.float32(0.045 * hg) * w_g, 0.0, 1.0)
+            C = C * c_mult_g
+            h = h + h_shift_g
+
+        if hsl_blue:
+            hb = float(np.clip(hsl_blue, -1.0, 1.0))
+            dh_b = ((h_deg - 252.0 + 180.0) % 360.0) - 180.0
+            w_b = (np.exp(-((dh_b / 40.0) ** 2)) * np.clip(C / 0.018, 0.0, 1.0) * w_not_skin).astype(np.float32)
+            # Negative = neutralise blue/cyan cast on white shirts; Positive = deeper sky blue
+            c_mult_b = np.clip(1.0 + (0.58 * hb if hb < 0 else 0.48 * hb) * w_b, 0.20, 1.65)
+            L = np.clip(L - np.float32(0.055 * hb) * w_b, 0.0, 1.0)
+            C = C * c_mult_b
+
+        a = (C * np.cos(h)).astype(np.float32)
+        b = (C * np.sin(h)).astype(np.float32)
+
+    sk_att = np.float32(0.38 if is_skin else 1.0)
+    if shadow_tone:
+        st = np.float32(np.clip(shadow_tone, -1.0, 1.0)) * sk_att
+        w_sh = ((1.0 - L) ** 2) * np.clip(L / 0.03, 0.0, 1.0)
+        a = a + st * np.float32(0.014) * w_sh
+        b = b + st * np.float32(0.036) * w_sh
+
+    if highlight_tone:
+        ht = np.float32(np.clip(highlight_tone, -1.0, 1.0)) * np.float32(0.65 if is_skin else 1.0)
+        w_hi = (L ** 2) * (1.0 - (L ** 10))
+        a = a + ht * np.float32(0.010) * w_hi
+        b = b + ht * np.float32(0.034) * w_hi
+
+    ok_out = np.empty_like(ok)
+    ok_out[..., 0] = L
+    ok_out[..., 1] = a
+    ok_out[..., 2] = b
+    return oklab_to_lin_gamut(ok_out)
+
+
+def auto_tone_params(rgb: np.ndarray, faces_n=()) -> dict:
+    """1-click intelligent Auto Ton AI solver in OKLab perceptual space:
+    analyses scene luminance percentiles (P1, P15, P50, P88, P99) and detected face skin lightness
+    (targeting natural portrait skin OKLab L ~ 0.72 without clipping highlights)."""
+    H, W = rgb.shape[:2]
+    s = min(1.0, 320.0 / max(H, W))
+    sm = rgb if s >= 1.0 else cv2.resize(rgb, (max(2, int(round(W * s))), max(2, int(round(H * s)))),
+                                          interpolation=cv2.INTER_AREA)
+    lin = srgb_to_lin(sm.astype(np.float32) / 255.0)
+    ok = lin_to_oklab(lin)
+    L = np.clip(ok[..., 0], 0.0, 1.0)
+    C = np.hypot(ok[..., 1], ok[..., 2])
+    p01, p15, p50, p88, p99 = (float(v) for v in np.percentile(L, (1.0, 15.0, 50.0, 88.0, 99.0)))
+
+    # Measure face skin lightness and split mixed-light chromatic asymmetry if faces are present
+    face_L = None
+    mixed_light_score = 0.0
+    sh, sw = sm.shape[:2]
+    face_vals = []
+    for f in (faces_n or ()):
+        fx, fy, fw, fh = (float(v) for v in f[:4])
+        # faces_n is normalized to image width W (so x,w in 0..1, y,h in 0..H/W)
+        x0 = max(0, int(round((fx + 0.18 * fw) * sw)))
+        x1 = min(sw, int(round((fx + 0.82 * fw) * sw)))
+        y0 = max(0, int(round((fy + 0.22 * fh) * sw)))
+        y1 = min(sh, int(round((fy + 0.78 * fh) * sw)))
+        if x1 > x0 + 4 and y1 > y0 + 2:
+            patch = L[y0:y1, x0:x1]
+            face_vals.append(float(np.percentile(patch, 60.0)))
+            xm = (x0 + x1) // 2
+            a_p = ok[y0:y1, x0:x1, 1]
+            b_p = ok[y0:y1, x0:x1, 2]
+            d_lr = float(np.hypot(ok[y0:y1, x0:xm, 1].mean() - ok[y0:y1, xm:x1, 1].mean(),
+                                  ok[y0:y1, x0:xm, 2].mean() - ok[y0:y1, xm:x1, 2].mean()))
+            sp_ab = float(np.hypot(np.percentile(a_p, 85) - np.percentile(a_p, 15),
+                                   np.percentile(b_p, 85) - np.percentile(b_p, 15)))
+            if d_lr > 0.028 or sp_ab > 0.052:
+                sc = float(np.clip(max(d_lr - 0.022, sp_ab - 0.042) * 8.5, 0.0, 0.90))
+                mixed_light_score = max(mixed_light_score, sc)
+    if face_vals:
+        face_L = float(np.median(face_vals))
+
+    # Solve exposure (EV): in OKLab, L ~ Y^(1/3), so 2^EV scales L by 2^(EV/3)
+    target_skin_L = 0.72
+    target_mid_L = 0.58
+    if face_L is not None and face_L > 0.08:
+        ev_raw = 3.0 * np.log2(np.clip(target_skin_L / face_L, 0.55, 1.85))
+    else:
+        ev_raw = 3.0 * np.log2(np.clip(target_mid_L / max(p50, 0.10), 0.55, 1.85))
+
+    # Protect highlights from harsh blowouts while allowing underexposed portraits to lift
+    max_ev_for_hi = 3.0 * np.log2(max(0.82, 0.96 / max(p99, 0.35)))
+    ev = float(np.clip(0.78 * ev_raw, -1.25, min(1.35, max_ev_for_hi + 0.35)))
+
+    # Predict post-exposure percentiles
+    l_mult = float(2.0 ** (ev / 3.0))
+    p15_post = min(1.0, p15 * l_mult)
+    p88_post = min(1.0, p88 * l_mult)
+    p99_post = min(1.0, p99 * l_mult)
+
+    # Shadows lift if dark areas remain below 0.40 or if exposure was capped by bright background
+    sh_deficit = max(0.0, 0.42 - p15_post) + max(0.0, ev_raw - ev) * 0.25
+    shadows = float(np.clip(sh_deficit * 1.45, -0.10, 0.65))
+
+    # Highlights recovery if upper tones are hot
+    hi_excess = max(0.0, p88_post - 0.76) + max(0.0, p99_post - 0.92) * 1.2
+    highlights = float(np.clip(-hi_excess * 2.1, -0.75, 0.15))
+
+    # Dynamic range & contrast
+    spread = p88_post - p15_post
+    contrast = float(np.clip((0.46 - spread) * 0.55, -0.10, 0.22))
+    whites = float(np.clip((0.92 - p99_post) * 0.75, -0.20, 0.25))
+    blacks = float(np.clip((0.12 - min(1.0, p01 * l_mult)) * 0.65, -0.22, 0.15))
+
+    mean_c = float(np.mean(C))
+    vibrance = float(np.clip((0.085 - mean_c) * 2.2, 0.0, 0.22))
+
+    res = {
+        "exposure": round(ev, 2),
+        "contrast": round(contrast, 2),
+        "highlights": round(highlights, 2),
+        "shadows": round(shadows, 2),
+        "whites": round(whites, 2),
+        "blacks": round(blacks, 2),
+        "vibrance": round(vibrance, 2),
+    }
+    if mixed_light_score > 0.05:
+        res["mixed_light"] = round(mixed_light_score, 2)
+    return res
+
 
 CLARITY_SIDE = 256   # fixed analysis scale so preview and full-res export produce identical clarity gain
 
@@ -215,4 +366,5 @@ def clarity_gain(Lq, skin_q, amount: float):
     Positive: crisp 3D micro-contrast with zero halo, sparing skin pores. Negative: soft portrait glow."""
     from .llf import fast_llf_gain
     return fast_llf_gain(Lq, skin_q, amount)
+
 

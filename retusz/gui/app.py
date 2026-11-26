@@ -18,59 +18,67 @@ from ..settings import Settings
 from ..sidecar import Series
 from ..engine.pipeline import Engine, Params
 from ..engine import render as R, color as C, device as DEV, modflows as MF, relight as RL
-from ..engine import histo as HI, wb as WB, geometry as G, colorchecker as CC, detail as DET
+from ..engine import histo as HI, wb as WB, geometry as G, colorchecker as CC, detail as DET, tone as TN
 
 ENGINE_LABEL = {"ai": "AI (B6)", "ai_light": "AI lekki (B0)", "classic": "bez AI (IDT)"}
 CANVAS_MODES = ["Wynik", "Przed | Po", "Podział", "Z wzorcem"]
 SLIDER_TABS = ["Światło i Kolor", "Portret i 3D", "Detal i Ostrość", "Wzorzec (AI)"]
 SLIDER_GROUPS = {
-    SLIDER_TABS[0]: [  # (key, label, lo, hi, kind, row, col) — 2-column vertical Lightroom stack
+    SLIDER_TABS[0]: [  # (key, label, lo, hi, kind, row, col) — Authentic 1-Column Lightroom Classic vertical stack
         ("temp", "Temperatura (WB)", -100, 100, "num", 0, 0),
-        ("tint", "Odcień (Tint WB)", -100, 100, "num", 0, 1),
-        ("exposure", "Ekspozycja", -200, 200, "ev", 1, 0),
-        ("contrast", "Kontrast", -100, 100, "num", 1, 1),
-        ("highlights", "Światła", -100, 100, "num", 2, 0),
-        ("shadows", "Cienie", -100, 100, "num", 2, 1),
-        ("whites", "Biele", -100, 100, "num", 3, 0),
-        ("blacks", "Czernie", -100, 100, "num", 3, 1),
-        ("vibrance", "Jaskrawość", -100, 100, "num", 4, 0),
-        ("saturation", "Nasycenie", -100, 100, "num", 4, 1),
+        ("tint", "Odcień (Tint)", -100, 100, "num", 1, 0),
+        ("exposure", "Ekspozycja", -200, 200, "ev", 2, 0),
+        ("contrast", "Kontrast", -100, 100, "num", 3, 0),
+        ("highlights", "Światła", -100, 100, "num", 4, 0),
+        ("shadows", "Cienie", -100, 100, "num", 5, 0),
+        ("whites", "Biele", -100, 100, "num", 6, 0),
+        ("blacks", "Czernie", -100, 100, "num", 7, 0),
+        ("vibrance", "Jaskrawość", -100, 100, "num", 8, 0),
+        ("saturation", "Nasycenie", -100, 100, "num", 9, 0),
     ],
     SLIDER_TABS[1]: [
         ("db", "Dodge & Burn", 0, 100, "pct", 0, 0),
-        ("plastic", "Plastyka 3D", 0, 100, "pct", 0, 1),
-        ("light_x", "Światło 3D: Lewo↔Prawo", -100, 100, "num", 1, 0),
-        ("light_y", "Światło 3D: Dół↔Góra", -100, 100, "num", 1, 1),
-        ("bg_exposure", "Separacja tła 3D", -100, 100, "num", 2, 0),
-        ("skin_hue", "Odcień skóry", -100, 100, "num", 2, 1),
-        ("skin_cast", "Czysta skóra", 0, 100, "pct", 3, 0),
-        ("skin_even", "Równanie skóry", 0, 100, "pct", 3, 1),
-        ("deshine", "Redukcja połysku", 0, 100, "pct", 4, 0),
-        ("blemish", "Niedoskonałości", 0, 100, "pct", 4, 1),
-        ("eyes_teeth", "Oczy i zęby", 0, 100, "pct", 5, 0),
+        ("plastic", "Plastyka 3D", 0, 100, "pct", 1, 0),
+        ("light_x", "Światło 3D: Poziom", -100, 100, "num", 2, 0),
+        ("light_y", "Światło 3D: Pion", -100, 100, "num", 3, 0),
+        ("bg_exposure", "Separacja tła 3D", -100, 100, "num", 4, 0),
+        ("skin_hue", "Odcień skóry", -100, 100, "num", 5, 0),
+        ("mixed_light", "Światło mieszane (LED)", 0, 100, "pct", 6, 0),
+        ("skin_cast", "Czysta skóra", 0, 100, "pct", 7, 0),
+        ("skin_even", "Równanie skóry", 0, 100, "pct", 8, 0),
+        ("deshine", "Redukcja połysku", 0, 100, "pct", 9, 0),
+        ("blemish", "Niedoskonałości", 0, 100, "pct", 10, 0),
+        ("eyes_teeth", "Oczy i zęby", 0, 100, "pct", 11, 0),
     ],
     SLIDER_TABS[2]: [
         ("sharpen_amount", "Ostrość", 0, 100, "pct", 0, 0),
-        ("texture", "Struktura", -100, 100, "num", 0, 1),
-        ("clarity", "Przejrzystość (LLF)", -100, 100, "num", 1, 0),
-        ("denoise", "Odszumianie OKLab", 0, 100, "pct", 1, 1),
-        ("brightness", "Jasność (Półtony)", -100, 100, "num", 2, 0),
-        ("dehaze", "Zamglenie (Dehaze)", -100, 100, "num", 2, 1),
-        ("wide", "Pełne barwy", 0, 100, "pct", 3, 0),
-        ("vignette", "Winieta", 0, 100, "pct", 3, 1),
+        ("texture", "Struktura", -100, 100, "num", 1, 0),
+        ("clarity", "Przejrzystość (LLF)", -100, 100, "num", 2, 0),
+        ("denoise", "Odszumianie OKLab", 0, 100, "pct", 3, 0),
+        ("brightness", "Jasność (Półtony)", -100, 100, "num", 4, 0),
+        ("dehaze", "Zamglenie (Dehaze)", -100, 100, "num", 5, 0),
+        ("shadow_tone", "Ciepło cieni", -100, 100, "num", 6, 0),
+        ("highlight_tone", "Blask świateł", -100, 100, "num", 7, 0),
+        ("hsl_green", "Zieleń (Plener)", -100, 100, "num", 8, 0),
+        ("hsl_blue", "Błękit (Niebo/Biel)", -100, 100, "num", 9, 0),
+        ("vignette", "Winieta", 0, 100, "pct", 10, 0),
     ],
     SLIDER_TABS[3]: [
         ("strength", "Siła kolorów wzorca", 0, 100, "pct", 0, 0),
-        ("skin", "Ochrona skóry", 0, 100, "pct", 0, 1),
-        ("mask_hue_tol", "Maska AI: Odcień skóry", -100, 100, "num", 1, 0),
-        ("mask_protect", "Maska AI: Oczy i usta", 0, 100, "pct", 1, 1),
+        ("skin", "Ochrona skóry", 0, 100, "pct", 1, 0),
+        ("mask_hue_tol", "Maska AI: Odcień", -100, 100, "num", 2, 0),
+        ("mask_protect", "Maska AI: Oczy i usta", 0, 100, "pct", 3, 0),
+        ("wide", "Pełne barwy (Gamut)", 0, 100, "pct", 4, 0),
     ],
 }
 
-# Wizualne podpowiedzi kierunkowe pod suwakami: (lewy_opis, prawy_opis, lewy_kolor_hex, prawy_kolor_hex)
+# Subtelny 3px pasek gradientu wyłącznie pod suwakami osi barwnych (styl Lightroom Classic)
+COLOR_BAR_KEYS = {"temp", "tint", "skin_hue", "mixed_light", "shadow_tone", "highlight_tone", "hsl_green", "hsl_blue"}
+
+# Wizualne podpowiedzi kierunkowe: (lewy_opis, prawy_opis, lewy_kolor_hex, prawy_kolor_hex)
 SLIDER_HINTS: dict[str, tuple[str, str, str, str]] = {
-    "temp": ("◀ Chłodny (Błękit)", "Ciepły (Bursztyn) ▶", "#64B5F6", "#FFB74D"),
-    "tint": ("◀ Zieleń", "Magenta (Róż) ▶", "#81C784", "#F06292"),
+    "temp": ("◀ Chłodny (Błękit)", "Ciepły (Bursztyn) ▶", "#5C9CE6", "#F0A848"),
+    "tint": ("◀ Zieleń", "Magenta (Róż) ▶", "#66BB6A", "#EC6496"),
     "exposure": ("◀ Ciemniej (-EV)", "Jaśniej (+EV) ▶", "#9A9A9A", "#E0E0E0"),
     "contrast": ("◀ Miękki / Płaski", "Głęboki kontrast ▶", "#9A9A9A", "#E0E0E0"),
     "highlights": ("◀ Odzyskaj światła", "Rozjaśnij światła ▶", "#90CAF9", "#FFE082"),
@@ -85,6 +93,7 @@ SLIDER_HINTS: dict[str, tuple[str, str, str, str]] = {
     "light_y": ("◀ z Dołu (blenda)", "z Góry (kluczowe) ▶", "#B0BEC5", "#FFE082"),
     "bg_exposure": ("◀ Przyciemnij tło", "Rozjaśnij tło ▶", "#78909C", "#FFF59D"),
     "skin_hue": ("◀ Róż / Czerwień", "Złoty / Żółty ▶", "#E57373", "#FFD54F"),
+    "mixed_light": ("0% (Biel/Czerwień LED)", "Jednolita skóra 52° ▶", "#E05A6D", "#F0B878"),
     "skin_cast": ("0%", "Usuń rumień i szarość ▶", "#F48FB1", "#FFD54F"),
     "skin_even": ("0%", "Wyrównaj plamy skóry ▶", "#9A9A9A", "#FFD54F"),
     "deshine": ("0%", "Usuń tłusty połysk ▶", "#9A9A9A", "#90CAF9"),
@@ -96,6 +105,10 @@ SLIDER_HINTS: dict[str, tuple[str, str, str, str]] = {
     "denoise": ("0%", "Usuń szum koloru/cieni ▶", "#9A9A9A", "#81C784"),
     "brightness": ("◀ Ciemniej półtony", "Jaśniej półtony ▶", "#9A9A9A", "#FFE082"),
     "dehaze": ("◀ Mglisty blask", "Usuń mgłę / Głębia ▶", "#B0BEC5", "#64B5F6"),
+    "shadow_tone": ("◀ Chłodny błękit cieni", "Ciepły bursztyn cieni ▶", "#5C8AE6", "#E09A48"),
+    "highlight_tone": ("◀ Chłodne światła", "Złote kremowe światła ▶", "#90CAF9", "#FFD56B"),
+    "hsl_green": ("◀ Szlachetna zieleń", "Soczysta zieleń ▶", "#557A66", "#76C858"),
+    "hsl_blue": ("◀ Czysta biel (bez błękitu)", "Głęboki błękit nieba ▶", "#B0BEC5", "#4294E8"),
     "wide": ("0% (sRGB)", "Szeroki gamut ▶", "#9A9A9A", "#F5A33B"),
     "vignette": ("0%", "Przyciemnij brzegi ▶", "#9A9A9A", "#E0E0E0"),
     "strength": ("0% (oryginał)", "100% (pełny wzorzec) ▶", "#9A9A9A", "#F5A33B"),
@@ -121,6 +134,7 @@ PRO_TIPS: dict[str, str] = {
     "light_y": "Światło 3D (Dół ↔ Góra): przesuwa wirtualny softbox 3D w pionie — w dół (−) odbicie od blendy, w górę (+) światło górne/motylkowe.",
     "bg_exposure": "Separacja tła 3D: w lewo (−) przyciemnia tło za postacią (efekt studyjny), w prawo (+) rozjaśnia tło. Twarz pozostaje nietknięta.",
     "skin_hue": "Odcień skóry (OKLCh): w lewo (−) przesuwa karnację w stronę różu/czerwieni, w prawo (+) w stronę złotego/brzoskwiniowego odcienia.",
+    "mixed_light": "Światło mieszane (LED / Błysk): ratuje twarz oświetloną dwoma różnymi światłami (np. pół twarzy białe od lampy, pół czerwone/fioletowe od LED-ów) — scala obie połówki do naturalnej skóry 52° OKLCh.",
     "skin_cast": "Czysta skóra: redukuje czerwony rumień (hemoglobinę) oraz ziemiste/sine zabarwienia cieni, sprowadzając skórę do osi 52° OKLCh.",
     "skin_even": "Równanie skóry: wyrównuje niskoczęstotliwościowe plamy barwne między twarzą, szyją i dłońmi bez rozmywania porów.",
     "deshine": "Redukcja połysku (De-Shine SUV): fizyczna separacja odbicia lustrzanego usuwająca tłusty błysk z czoła i nosa z odzyskaniem porów.",
@@ -132,6 +146,10 @@ PRO_TIPS: dict[str, str] = {
     "denoise": "Odszumianie OKLab: usuwa kolorowy szum matrycy (chroma) i ziarnistość w cieniach z zachowaniem ostrych krawędzi.",
     "brightness": "Jasność (Półtony w stylu Capture One): rozjaśnia lub przyciemnia półtony bez ruszania czystej czerni i czystej bieli.",
     "dehaze": "Zamglenie (Dehaze): w prawo (+) usuwa mgiełkę i flarę pod światło, w lewo (−) dodaje miękką, powietrzną poświatę.",
+    "shadow_tone": "Ciepło cieni (Split Toning OKLab): w lewo (−) nadaje cieniom chłodny kinowy błękit, w prawo (+) miękki, ciepły bursztyn.",
+    "highlight_tone": "Blask świateł (Split Toning OKLab): w lewo (−) chłodzi jasne partie, w prawo (+) daje kremowy blask złotej godziny.",
+    "hsl_green": "Zieleń (Plener OKLCh): w lewo (−) zamienia jaskrawą trawę/liście w szlachetną, filmową zieleń, w prawo (+) ożywia roślinność (skóra 100% chroniona).",
+    "hsl_blue": "Błękit (Niebo/Biel OKLCh): w lewo (−) zdejmuje niebieski zafarb z białych koszul i sukni, w prawo (+) pogłębia błękit nieba.",
     "wide": "Pełne barwy: symuluje głębię barw monitora szeroko-gamutowego (Adobe RGB) w przestrzeni docelowej.",
     "vignette": "Winieta: przyciemnia brzegi kadru poza postacią, skupiając wzrok na portrecie.",
     "strength": "Siła kolorów wzorca: określa w ilu procentach zastosować dopasowanie barwne do wybranego wzorca lub tablicy ColorChecker.",
@@ -154,12 +172,13 @@ _COPY_KEYS = (
     "strength", "skin", "exposure", "contrast", "brightness", "dehaze", "shadows", "highlights", "whites", "blacks",
     "vignette", "db", "plastic", "clarity", "texture", "sharpen_amount", "sharpen_mode", "denoise",
     "light_angle", "light_x", "light_y", "bg_exposure", "saturation", "vibrance",
-    "skin_even", "skin_cast", "skin_hue", "deshine", "blemish", "eyes_teeth", "mask_hue_tol", "mask_protect",
+    "shadow_tone", "highlight_tone", "hsl_green", "hsl_blue",
+    "skin_even", "mixed_light", "skin_cast", "skin_hue", "deshine", "blemish", "eyes_teeth", "mask_hue_tol", "mask_protect",
     "wide", "temp", "tint",
 )
-SLIDER_AREA_H = 414
+SLIDER_AREA_H = 446
 TOOLS = ["Pędzel D&B", "Kadr"]
-TOOL_W, TOOL_H = 382, 134
+TOOL_W, TOOL_H = 368, 138
 PHOTO_TYPES = [(
     "Zdjęcia i RAW",
     "*.jpg *.jpeg *.png *.tif *.tiff *.webp "
@@ -171,7 +190,9 @@ BRUSH_MODES = ["Wył.", "Rozjaśnij", "Przyciemnij"]
 class RetuszApp(ctk.CTk):
     def __init__(self, path=None, reference=None):
         T.setup(); super().__init__(fg_color=T.BG)
-        self.title(f"Retusz {__version__} – Edytor Portretowy"); self.geometry("1440x880"); self.minsize(1120, 700)
+        sw = max(1120, min(1440, self.winfo_screenwidth() - 16))
+        sh = max(700, min(880, self.winfo_screenheight() - 40))
+        self.title(f"Retusz {__version__} – Edytor Portretowy"); self.geometry(f"{sw}x{sh}"); self.minsize(1120, 700)
         self.settings = Settings.load(); DEV.MODE = self.settings.device
         if sys.platform == "win32":
             try:
@@ -190,7 +211,7 @@ class RetuszApp(ctk.CTk):
         self.show_before = False; self._clipboard = None
         self.presets: list[PR.Preset] = PR.list_presets()
         self._undo: list[dict] = []; self._redo: list[dict] = []; self._hist_anchor = self.params.to_dict(); self._hist_after = None
-        self.tool = "brush"; self.hline_on = False; self._hline = None; self._crop_drag = None; self._crop_live = None
+        self.tool = "brush"; self.tool_open = False; self.hline_on = False; self._hline = None; self._crop_drag = None; self._crop_live = None
         self._geo_after = None
         threading.Thread(target=self._worker, daemon=True).start()
         self._build(); self._poll()
@@ -217,55 +238,56 @@ class RetuszApp(ctk.CTk):
 
     # ================= layout =================
     def _build(self):
-        # Clean Lightroom-style top bar divided into 3 uncluttered groups: Files (left), Modules & View (center), Export (right)
-        top = ctk.CTkFrame(self, fg_color=T.BG); top.pack(fill="x", padx=12, pady=(8, 6))
+        # 1. Calm Adobe Lightroom Classic Top Header Bar: Files & Presets (left), Module Picker (center), Export (right)
+        top = ctk.CTkFrame(self, fg_color=T.BG); top.pack(fill="x", padx=12, pady=(6, 4))
         def tbtn(parent, text, cmd, w, accent=False, side="left", padx=0):
             b = T.button(parent, text, cmd, accent=accent, width=w)
-            b.configure(font=T.font(12, "bold" if accent else "normal"), height=30)
+            b.configure(font=T.font(12, "bold" if accent else "normal"), height=28)
             b.pack(side=side, padx=padx)
             return b
-        tbtn(top, "Otwórz zdjęcie", self.open_photo, 96)
-        tbtn(top, "Otwórz folder", self.open_folder, 90, padx=4)
-        tbtn(top, "Ustawienia", self.open_settings, 76)
+        tbtn(top, "Otwórz zdjęcia", self.open_photo, 102)
+        tbtn(top, "Otwórz folder", self.open_folder, 94, padx=4)
+        tbtn(top, "Ustawienia", self.open_settings, 78)
+
+        pr_bar = ctk.CTkFrame(top, fg_color=T.BG); pr_bar.pack(side="left", padx=(10, 0))
+        T.label(pr_bar, "Preset:", 11, T.MUTED).pack(side="left", padx=(0, 4))
+        self.preset_menu = ctk.CTkOptionMenu(
+            pr_bar, values=[p.name for p in self.presets], command=self.apply_preset_by_name,
+            width=148, height=26, fg_color=T.BTN, button_color=T.BTN, button_hover_color=T.BTN_HOVER,
+            text_color=T.TEXT, font=T.font(11), dropdown_font=T.font(11), corner_radius=6
+        )
+        self.preset_menu.set("Portret naturalny"); self.preset_menu.pack(side="left")
+        pb_save = T.button(pr_bar, "+Preset", self.save_custom_preset_dialog, width=56)
+        pb_save.configure(height=26, font=T.font(10)); pb_save.pack(side="left", padx=(3, 2))
+        pb_ser = T.button(pr_bar, "→seria", self.preset_to_series, width=48)
+        pb_ser.configure(height=26, font=T.font(10)); pb_ser.pack(side="left")
 
         tbtn(top, "Eksportuj serię", self.export_series, 108, accent=True, side="right")
         tbtn(top, "Eksportuj jako…", self.open_export_as, 112, accent=True, side="right", padx=4)
-        tbtn(top, "Zapisz", self.save_current, 58, accent=True, side="right")
+        tbtn(top, "Zapisz", self.save_current, 60, accent=True, side="right")
 
-        mod_bar = ctk.CTkFrame(top, fg_color=T.BG); mod_bar.pack(side="left", padx=(10, 0))
-        tbtn(mod_bar, "Biblioteka (G)", self.show_library, 92, padx=(0, 3))
-        tbtn(mod_bar, "Porównaj", self.show_compare, 68, padx=(0, 3))
-        tbtn(mod_bar, "Grading z AI", self.open_transfer, 86)
-
-        vb = ctk.CTkFrame(top, fg_color=T.BG); vb.pack(side="left", padx=(8, 0))
-        self.canvas_mode = T.segmented(vb, CANVAS_MODES, command=self._set_canvas_mode)
-        self.canvas_mode.configure(font=T.font(12), height=30)
-        self.canvas_mode.set("Przed | Po" if not self.ref_enabled else "Z wzorcem")
-        self.canvas_mode.pack(side="left")
-
-        zb = ctk.CTkFrame(top, fg_color=T.BG); zb.pack(side="left", padx=(6, 0))
-        tbtn(zb, "Dopasuj", self.zoom_fit, 56)
-        tbtn(zb, "100%", self.zoom_100, 42, padx=3)
-        self.before_btn = tbtn(zb, "Przed/Po", self.toggle_before, 64, padx=(0, 3))
-        zbox = ctk.CTkFrame(zb, fg_color=T.BG, width=38, height=28); zbox.pack(side="left"); zbox.pack_propagate(False)
-        self.zoom_lbl = T.label(zbox, "", 12, T.MUTED, anchor="w"); self.zoom_lbl.pack(fill="both", expand=True)
+        mod_bar = ctk.CTkFrame(top, fg_color=T.BG); mod_bar.pack(side="left", padx=(14, 0))
+        tbtn(mod_bar, "Biblioteka (G)", self.show_library, 96, padx=(0, 3))
+        tbtn(mod_bar, "Edycja (D)", self.hide_library, 76, padx=(0, 3))
+        tbtn(mod_bar, "Porównaj", self.show_compare, 72, padx=(0, 3))
+        tbtn(mod_bar, "Grading z AI", self.open_transfer, 88)
 
         self.main = ctk.CTkFrame(self, fg_color=T.BG); self.main.pack(fill="both", expand=True)
         self.compare = CompareView(self, self.hide_compare, self.save_current, self._compare_full)
         self.library = LibraryView(self, self)
 
         # Left Filmstrip (compact)
-        side = ctk.CTkFrame(self.main, fg_color=T.BG, width=154); side.pack(side="left", fill="y", padx=(12, 0))
+        side = ctk.CTkFrame(self.main, fg_color=T.BG, width=148); side.pack(side="left", fill="y", padx=(12, 0))
         self.series_lbl = T.label(side, "Seria", 12, weight="bold"); self.series_lbl.pack(anchor="w", pady=(0, 4))
-        self.strip = ctk.CTkScrollableFrame(side, fg_color=T.PANEL, width=136, corner_radius=8)
+        self.strip = ctk.CTkScrollableFrame(side, fg_color=T.PANEL, width=132, corner_radius=8)
         self.strip.pack(fill="y", expand=True)
 
-        # Right-Side Lightroom / Capture One Develop Inspector Dock
-        dock = ctk.CTkFrame(self.main, fg_color=T.CARD, width=414, corner_radius=10, border_width=1, border_color=T.BORDER)
+        # Right-Side Authentic Single-Column Adobe Lightroom Classic Panel (384 px)
+        dock = ctk.CTkFrame(self.main, fg_color=T.CARD, width=384, corner_radius=10, border_width=1, border_color=T.BORDER)
         dock.pack(side="right", fill="y", padx=(0, 12), pady=(0, 2))
         dock.pack_propagate(False)
 
-        # Central Viewport (Full vertical height for portraits!)
+        # Central Viewport + Bottom Lightroom Loupe Toolbar ('T' bar directly below the canvas)
         body = ctk.CTkFrame(self.main, fg_color=T.BG); body.pack(side="left", fill="both", expand=True, padx=10)
         self.imgs = ctk.CTkFrame(body, fg_color=T.BG); self.imgs.pack(fill="both", expand=True)
         self.imgs.grid_rowconfigure(1, weight=1)
@@ -273,8 +295,36 @@ class RetuszApp(ctk.CTk):
         self.res_hdr = T.label(self.imgs, "Wynik", 13)
         self.ref_hdr = T.label(self.imgs, "Wzorzec (opcjonalny)", 13)
         self.view_src = ImageView(self.imgs, "Otwórz zdjęcie lub folder")
-        self.view_res = ImageView(self.imgs, "Otwórz zdjęcie lub folder — pełny edytor OKLab / Plastyka 3D / D&B v2.\nSuwaki i narzędzia znajdują się w prawym doku inspektora.")
+        self.view_res = ImageView(self.imgs, "Otwórz zdjęcie lub folder — układ Adobe Lightroom Classic (1 kolumna suwaków).")
         self.view_ref = ImageView(self.imgs, "Opcjonalny wzorzec (AI Color Match)\nWybierz wzorzec w zakładce „Wzorzec (AI)” po prawej")
+
+        # Bottom Lightroom Loupe Toolbar directly under the photo canvas
+        loupe_bar = ctk.CTkFrame(body, fg_color=T.PANEL, height=34, corner_radius=7)
+        loupe_bar.pack(fill="x", pady=(4, 0))
+        loupe_bar.pack_propagate(False)
+        self.canvas_mode = T.segmented(loupe_bar, CANVAS_MODES, command=self._set_canvas_mode)
+        self.canvas_mode.configure(font=T.font(11), height=26)
+        self.canvas_mode.set("Przed | Po" if not self.ref_enabled else "Z wzorcem")
+        self.canvas_mode.pack(side="left", padx=(6, 4), pady=4)
+        self.before_btn = T.button(loupe_bar, "Przed/Po (\\)", self.toggle_before, width=78)
+        self.before_btn.configure(height=25, font=T.font(11)); self.before_btn.pack(side="left", padx=(0, 8))
+
+        st_bar = ctk.CTkFrame(loupe_bar, fg_color=T.PANEL); st_bar.pack(side="left", padx=(4, 0))
+        T.label(st_bar, "Ocena:", 11, T.MUTED).pack(side="left", padx=(0, 3))
+        self.star_btns = []
+        for st_i in range(6):
+            txt = "0" if st_i == 0 else f"{st_i}★"
+            sb = T.button(st_bar, txt, lambda s=st_i: self._set_current_rating(s), width=24)
+            sb.configure(height=23, font=T.font(10), corner_radius=5)
+            sb.pack(side="left", padx=1)
+            self.star_btns.append(sb)
+
+        zb = ctk.CTkFrame(loupe_bar, fg_color=T.PANEL); zb.pack(side="right", padx=(0, 6))
+        b_fit = T.button(zb, "Dopasuj", self.zoom_fit, width=58); b_fit.configure(height=24, font=T.font(11)); b_fit.pack(side="left")
+        b_100 = T.button(zb, "100%", self.zoom_100, width=44); b_100.configure(height=24, font=T.font(11)); b_100.pack(side="left", padx=4)
+        zbox = ctk.CTkFrame(zb, fg_color=T.PANEL, width=42, height=24); zbox.pack(side="left"); zbox.pack_propagate(False)
+        self.zoom_lbl = T.label(zbox, "", 11, T.MUTED, anchor="e"); self.zoom_lbl.pack(fill="both", expand=True)
+
         self._apply_canvas_layout()
 
         self.view_res.bind("<ButtonPress-1>", self._brush_press); self.view_res.bind("<B1-Motion>", self._brush_move)
@@ -290,245 +340,251 @@ class RetuszApp(ctk.CTk):
         self.view_src.bind("<ButtonPress-1>", lambda e: self._pan_start(self.view_src, e))
         self.view_src.bind("<B1-Motion>", lambda e: self._pan_move(self.view_src, e)); self.view_src.bind("<ButtonRelease-1>", lambda e: self._pan_end())
 
-        # ---- Right Dock Section 1: Histogram + OKLCh Skin Vectorscope (52°) + Quick History & Series status ----
+        # ---- Right Dock Section 1: Full-Width Histogram + OKLCh Skin Vectorscope (52°) ----
         top_dock = ctk.CTkFrame(dock, fg_color=T.CARD)
         top_dock.pack(fill="x", padx=8, pady=(6, 2))
-        h_left = ctk.CTkFrame(top_dock, fg_color=T.CARD)
-        h_left.pack(side="left")
-        self.hist = HistView(h_left, on_toggle=self.toggle_clip, width=204, height=68); self.hist.pack(anchor="w")
-        hb = ctk.CTkFrame(h_left, fg_color=T.CARD, width=204, height=16); hb.pack(anchor="w", pady=(1, 0)); hb.pack_propagate(False)
+        self.hist = HistView(top_dock, on_toggle=self.toggle_clip, width=366, height=64)
+        self.hist.pack(fill="x")
+        h_meta = ctk.CTkFrame(top_dock, fg_color=T.CARD)
+        h_meta.pack(fill="x", pady=(2, 0))
+        hb = ctk.CTkFrame(h_meta, fg_color=T.CARD, width=158, height=16); hb.pack(side="left"); hb.pack_propagate(False)
         self.clip_lbl = T.label(hb, "Cienie – · Światła –", 10, T.MUTED, anchor="w"); self.clip_lbl.pack(fill="both", expand=True)
-        sw_row = ctk.CTkFrame(h_left, fg_color=T.CARD); sw_row.pack(anchor="w", fill="x", pady=(1, 0))
-        self.clip_sw = ctk.CTkSwitch(sw_row, text="Przepalenia (J)", progress_color=T.ACCENT, text_color=T.TEXT, font=T.font(10),
-                                     width=102, switch_width=24, switch_height=12, command=lambda: self.toggle_clip(self.clip_sw.get() == 1))
-        self.clip_sw.pack(side="left")
-        self.mask_sw = ctk.CTkSwitch(sw_row, text="Maska AI (M)", progress_color=T.ACCENT, text_color=T.TEXT, font=T.font(10),
-                                     width=96, switch_width=24, switch_height=12, command=lambda: self.toggle_mask(self.mask_sw.get() == 1))
+        self.mask_sw = ctk.CTkSwitch(h_meta, text="Maska AI (M)", progress_color=T.ACCENT, text_color=T.TEXT, font=T.font(10),
+                                     width=94, switch_width=24, switch_height=12, command=lambda: self.toggle_mask(self.mask_sw.get() == 1))
         if self.settings.show_mask:
             self.mask_sw.select()
-        self.mask_sw.pack(side="left", padx=(4, 0))
+        self.mask_sw.pack(side="right")
+        self.clip_sw = ctk.CTkSwitch(h_meta, text="Przepalenia (J)", progress_color=T.ACCENT, text_color=T.TEXT, font=T.font(10),
+                                     width=100, switch_width=24, switch_height=12, command=lambda: self.toggle_clip(self.clip_sw.get() == 1))
+        self.clip_sw.pack(side="right", padx=(0, 6))
 
-        h_right = ctk.CTkFrame(top_dock, fg_color=T.CARD)
-        h_right.pack(side="right", fill="both", expand=True, padx=(6, 0))
-        ob = ctk.CTkFrame(h_right, fg_color=T.CARD); ob.pack(anchor="w", fill="x")
-        T.label(ob, "Zdjęcie:", 11).pack(side="left")
-        self.override_lbl = T.label(ob, "serii", 11, T.MUTED); self.override_lbl.pack(side="left", padx=(4, 0))
-        s_row = ctk.CTkFrame(h_right, fg_color=T.CARD); s_row.pack(fill="x", pady=(3, 2))
-        b1 = T.button(s_row, "Przywróć z serii", self.reset_to_series, width=90); b1.configure(height=23, font=T.font(10)); b1.pack(side="left")
-        b2 = T.button(s_row, "Ustaw jako serię", self.make_series_default, width=92); b2.configure(height=23, font=T.font(10)); b2.pack(side="right")
+        # ---- Right Dock Section 2: Lightroom Local Tool Strip under Histogram (Collapsible Drawer!) ----
+        tool_strip = ctk.CTkFrame(dock, fg_color=T.PANEL, corner_radius=6, height=30)
+        tool_strip.pack(fill="x", padx=8, pady=(2, 3))
+        tool_strip.pack_propagate(False)
+        self.tool_tabs = T.segmented(tool_strip, TOOLS, command=self._tool_tab, width=164)
+        self.tool_tabs.configure(height=24, font=T.font(11))
+        self.tool_tabs.set(TOOLS[0]); self.tool_tabs.pack(side="left", padx=(3, 4), pady=3)
+        self.pick_btn = T.button(tool_strip, "Pipeta WB (W)", self.toggle_pick, width=88)
+        self.pick_btn.configure(height=24, font=T.font(10)); self.pick_btn.pack(side="left", pady=3)
+        self.auto_tone_btn = T.button(tool_strip, "★ Auto Ton AI", self.auto_tone_ai, accent=True, width=102)
+        self.auto_tone_btn.configure(height=24, font=T.font(10, "bold")); self.auto_tone_btn.pack(side="right", padx=(0, 3), pady=3)
 
-        act = ctk.CTkFrame(h_right, fg_color=T.CARD); act.pack(fill="x", pady=(3, 0))
-        def sbtn(text, cmd, w):
-            b_ = T.button(act, text, cmd, width=w); b_.configure(height=23, font=T.font(10), corner_radius=5); b_.pack(side="left", padx=(0, 2)); return b_
-        self.undo_btn = sbtn("Cofnij", self.undo, 36)
-        self.redo_btn = sbtn("Ponów", self.redo, 36)
-        sbtn("Kopiuj", self.copy_params, 36)
-        self.paste_btn = sbtn("Wklej", self.paste_params, 34)
-        sbtn("Zeruj", self.reset_adjustments, 34)
-
-        # ---- Right Dock Section 2: Develop Tabs & Sliders with Colored Directional Hint Bars ----
+        # ---- Right Dock Section 3: Single-Column Develop Tabs & Sliders (Lightroom Classic 1-Col Stack) ----
         sl = ctk.CTkFrame(dock, fg_color=T.CARD)
-        sl.pack(fill="x", padx=6, pady=(2, 2))
-        self.slider_tabs = T.segmented(sl, SLIDER_TABS, command=self._slider_tab, dynamic_resizing=False, width=398)
-        self.slider_tabs.configure(font=T.font(11), height=28)
-        self.slider_tabs.set(SLIDER_TABS[0]); self.slider_tabs.pack(fill="x", pady=(0, 2))
+        sl.pack(fill="x", padx=8, pady=(1, 2))
+        self.slider_tabs = T.segmented(sl, SLIDER_TABS, command=self._slider_tab, dynamic_resizing=False, width=368)
+        self.slider_tabs.configure(font=T.font(11), height=27)
+        self.slider_tabs.set(SLIDER_TABS[0]); self.slider_tabs.pack(fill="x", pady=(0, 4))
 
         sl_area = ctk.CTkFrame(sl, fg_color=T.CARD, height=SLIDER_AREA_H)
         sl_area.pack(fill="x", expand=True); sl_area.pack_propagate(False)
+        self.sl_area = sl_area
         self.slider_frames = {}
         self.sliders = {}
-        def value_box(parent, width):
-            box = ctk.CTkFrame(parent, fg_color=T.CARD, width=width, height=17); box.pack_propagate(False)
+        def value_box(parent, width=52):
+            box = ctk.CTkFrame(parent, fg_color=T.CARD, width=width, height=18); box.pack_propagate(False)
             lab = T.label(box, "", 11, T.MUTED, anchor="e"); lab.pack(fill="both", expand=True); return box, lab
         for tname in SLIDER_TABS:
             f = ctk.CTkFrame(sl_area, fg_color=T.CARD)
             f.place(x=0, y=0, relwidth=1, relheight=1)
-            for c in range(2): f.grid_columnconfigure(c, weight=1, uniform=f"sl_{tname}")
+            f.grid_columnconfigure(0, weight=1)
             self.slider_frames[tname] = f
             for key, text, lo, hi, kind, r_, c_ in SLIDER_GROUPS[tname]:
-                cell = ctk.CTkFrame(f, fg_color=T.CARD); cell.grid(row=r_, column=c_, sticky="ew", padx=4, pady=1)
-                cell.grid_columnconfigure(0, weight=1)
-                lbl = T.label(cell, text, 11, anchor="w", weight="bold"); lbl.grid(row=0, column=0, sticky="w")
-                box, val = value_box(cell, 54 if kind == "ev" else 38); box.grid(row=0, column=1, sticky="e")
-                s = T.slider(cell, lo, hi, number_of_steps=hi-lo, width=170, command=lambda v, k=key: self._slider(k, v))
-                s.configure(height=12)
-                s.grid(row=1, column=0, columnspan=2, sticky="ew")
-                if key in SLIDER_HINTS:
-                    l_txt, r_txt, l_col, r_col = SLIDER_HINTS[key]
-                    hrow = ctk.CTkFrame(cell, fg_color=T.CARD, height=12)
-                    hrow.grid(row=2, column=0, columnspan=2, sticky="ew")
-                    T.label(hrow, l_txt, 9, l_col, anchor="w").pack(side="left")
-                    T.label(hrow, r_txt, 9, r_col, anchor="e").pack(side="right")
-                for w_ in (cell, lbl, val, s):
+                row_f = ctk.CTkFrame(f, fg_color=T.CARD)
+                row_f.grid(row=r_, column=0, sticky="ew", padx=4, pady=1)
+                row_f.grid_columnconfigure(1, weight=1)
+                lbox = ctk.CTkFrame(row_f, fg_color=T.CARD, width=128, height=19)
+                lbox.grid(row=0, column=0, sticky="w"); lbox.pack_propagate(False)
+                lbl = T.label(lbox, text, 11, anchor="w"); lbl.pack(fill="both", expand=True)
+                s = T.slider(row_f, lo, hi, number_of_steps=hi-lo, width=176, command=lambda v, k=key: self._slider(k, v))
+                s.configure(height=13)
+                s.grid(row=0, column=1, sticky="ew", padx=(4, 4))
+                box, val = value_box(row_f, 52); box.grid(row=0, column=2, sticky="e")
+                if key in COLOR_BAR_KEYS and key in SLIDER_HINTS:
+                    _, _, l_col, r_col = SLIDER_HINTS[key]
+                    gbar = ctk.CTkFrame(row_f, fg_color=T.CARD, height=3)
+                    gbar.grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(1, 0))
+                    gbar.grid_columnconfigure(0, weight=1); gbar.grid_columnconfigure(1, weight=1)
+                    ctk.CTkFrame(gbar, fg_color=l_col, height=3, corner_radius=0).grid(row=0, column=0, sticky="ew")
+                    ctk.CTkFrame(gbar, fg_color=r_col, height=3, corner_radius=0).grid(row=0, column=1, sticky="ew")
+                for w_ in (row_f, lbox, lbl, val, s):
                     w_.bind("<Double-Button-1>", lambda e, k=key: self._reset_slider(k))
                     w_.bind("<Enter>", lambda e, k=key: self._set_pro_tip(k))
                 self.sliders[key] = (s, val, kind)
         for alias, target in _TAB_ALIASES.items():
             self.slider_frames[alias] = self.slider_frames[target]
 
-        # Tab 0: White Balance bar in row 5, cols 0-1
+        # Tab 0 footer row: White Balance quick actions
         f0 = self.slider_frames[SLIDER_TABS[0]]
-        wbc = ctk.CTkFrame(f0, fg_color=T.CARD); wbc.grid(row=5, column=0, columnspan=2, sticky="ew", padx=4, pady=(4, 1))
-        T.label(wbc, "Balans bieli (Bradford):", 11, T.MUTED, anchor="w").pack(side="left", padx=(0, 4))
-        self.pick_btn = T.button(wbc, "Pipeta (W)", self.toggle_pick, width=82); self.pick_btn.configure(height=23, font=T.font(10))
-        self.pick_btn.pack(side="left", padx=(0, 3))
-        b = T.button(wbc, "Balans → seria", self.sync_wb, width=96); b.configure(height=23, font=T.font(10)); b.pack(side="left", padx=(0, 3))
-        b = T.button(wbc, "Zeruj WB", self.reset_wb, width=62); b.configure(height=23, font=T.font(10)); b.pack(side="left")
+        wbc = ctk.CTkFrame(f0, fg_color=T.PANEL, corner_radius=6)
+        wbc.grid(row=10, column=0, sticky="ew", padx=4, pady=(8, 2))
+        T.label(wbc, "Balans bieli:", 11, T.MUTED, anchor="w").pack(side="left", padx=(8, 6), pady=4)
+        b_wbs = T.button(wbc, "Balans → seria", self.sync_wb, width=96); b_wbs.configure(height=23, font=T.font(10)); b_wbs.pack(side="left", padx=(0, 4), pady=4)
+        b_wbr = T.button(wbc, "Zeruj WB", self.reset_wb, width=68); b_wbr.configure(height=23, font=T.font(10)); b_wbr.pack(side="left", pady=4)
+        b_at = T.button(wbc, "★ Auto Ton AI", self.auto_tone_ai, accent=True, width=98); b_at.configure(height=23, font=T.font(10, "bold")); b_at.pack(side="right", padx=(0, 6), pady=4)
 
-        # Tab 1: 3D Light Auto switch + Presets selector in row 5, col 1 (plus hidden legacy self.light angle slider for gui_check)
+        # Tab 1 footer row: 3D Light Auto switch & angle readout
         f1 = self.slider_frames[SLIDER_TABS[1]]
-        pcell = ctk.CTkFrame(f1, fg_color=T.CARD); pcell.grid(row=5, column=1, sticky="ew", padx=4, pady=1)
-        pcell.grid_columnconfigure(0, weight=1)
-        l_hdr = ctk.CTkFrame(pcell, fg_color=T.CARD); l_hdr.grid(row=0, column=0, columnspan=3, sticky="ew")
-        self.light_auto = ctk.CTkSwitch(l_hdr, text="Auto 3D", progress_color=T.ACCENT, text_color=T.TEXT, width=68,
+        pcell = ctk.CTkFrame(f1, fg_color=T.PANEL, corner_radius=6)
+        pcell.grid(row=12, column=0, sticky="ew", padx=4, pady=(5, 2))
+        T.label(pcell, "Kierunek światła 3D:", 11, T.MUTED).pack(side="left", padx=(8, 6), pady=4)
+        self.light_auto = ctk.CTkSwitch(pcell, text="Auto z wzorca / AI", progress_color=T.ACCENT, text_color=T.TEXT, width=132,
                                         switch_width=24, switch_height=12, font=T.font(10), command=self._light_auto)
-        self.light_auto.pack(side="left")
-        _, self.light_val = value_box(l_hdr, 42)
-        pb_save = T.button(l_hdr, "+Preset", self.save_custom_preset_dialog, width=48)
-        pb_save.configure(height=18, font=T.font(9)); pb_save.pack(side="right")
-        pb_ser = T.button(l_hdr, "→seria", self.preset_to_series, width=42)
-        pb_ser.configure(height=18, font=T.font(9)); pb_ser.pack(side="right", padx=(0, 2))
-        self.preset_menu = ctk.CTkOptionMenu(
-            pcell, values=[p.name for p in self.presets], command=self.apply_preset_by_name,
-            width=170, height=22, fg_color=T.BTN, button_color=T.BTN, button_hover_color=T.BTN_HOVER,
-            text_color=T.TEXT, font=T.font(10), dropdown_font=T.font(11), corner_radius=6
-        )
-        self.preset_menu.set("Portret naturalny"); self.preset_menu.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(1, 0))
-        # Alias self.light to light_x slider so legacy callers checking app.light geometry work seamlessly
+        self.light_auto.pack(side="left", pady=4)
+        lbox_v, self.light_val = value_box(pcell, 58)
+        lbox_v.configure(fg_color=T.PANEL); lbox_v.pack(side="right", padx=(0, 8), pady=4)
         self.light = self.sliders["light_x"][0]
 
-        # Tab 2: Detail & Sharpening ('Detal i Ostrość'): Sharpening mode selector at (4, 0) + Star Rating at (4, 1)
+        # Tab 2 footer row: Sharpening mode selector
         f_det = self.slider_frames[SLIDER_TABS[2]]
-        sh_cell = ctk.CTkFrame(f_det, fg_color=T.CARD); sh_cell.grid(row=4, column=0, sticky="ew", padx=4, pady=2)
-        sh_cell.grid_columnconfigure(0, weight=1)
-        T.label(sh_cell, "Tryb wyostrzania", 11, anchor="w", weight="bold").grid(row=0, column=0, sticky="w")
+        sh_cell = ctk.CTkFrame(f_det, fg_color=T.PANEL, corner_radius=6)
+        sh_cell.grid(row=11, column=0, sticky="ew", padx=4, pady=(6, 2))
+        T.label(sh_cell, "Algorytm wyostrzania:", 11, T.MUTED, anchor="w").pack(side="left", padx=(8, 6), pady=4)
         self.sharpen_mode_menu = ctk.CTkOptionMenu(
             sh_cell, values=list(DET.SHARPEN_MODES.values()), command=self._set_sharpen_mode,
-            width=170, height=23, fg_color=T.BTN, button_color=T.BTN, button_hover_color=T.BTN_HOVER,
+            width=210, height=23, fg_color=T.BTN, button_color=T.BTN, button_hover_color=T.BTN_HOVER,
             text_color=T.TEXT, font=T.font(10), dropdown_font=T.font(11), corner_radius=6
         )
         self.sharpen_mode_menu.set(DET.SHARPEN_MODES["portrait"])
-        self.sharpen_mode_menu.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        self.sharpen_mode_menu.pack(side="right", padx=(0, 6), pady=4)
 
-        st_cell = ctk.CTkFrame(f_det, fg_color=T.CARD); st_cell.grid(row=4, column=1, sticky="ew", padx=4, pady=2)
-        T.label(st_cell, "Ocena zdjęcia (★)", 11, anchor="w", weight="bold").grid(row=0, column=0, columnspan=6, sticky="w")
-        self.star_btns = []
-        for st_i in range(6):
-            txt = "0" if st_i == 0 else f"{st_i}★"
-            sb = T.button(st_cell, txt, lambda s=st_i: self._set_current_rating(s), width=24)
-            sb.configure(height=23, font=T.font(10), corner_radius=5)
-            sb.grid(row=1, column=st_i, padx=(0, 2), pady=(2, 0))
-            self.star_btns.append(sb)
-        T.label(f_det, "Wyostrzanie RL / Clamped USM (0% halo) i odszumianie OKLab działa na żywo.",
-                10, T.MUTED, anchor="w").grid(row=5, column=0, columnspan=2, sticky="w", padx=4, pady=(3, 1))
-
-        # Tab 3: Reference Match, Per-Photo Reference, AI Mask Refinement & ColorChecker section
+        # Tab 3 footer rows: Reference Match, ColorChecker 24 & Per-Photo Reference Pool
         f2 = self.slider_frames[SLIDER_TABS[3]]
-        rc = ctk.CTkFrame(f2, fg_color=T.CARD); rc.grid(row=2, column=0, sticky="ew", padx=4, pady=3)
-        T.label(rc, "Wzorzec serii (AI)", 11, anchor="w", weight="bold").grid(row=0, column=0, columnspan=2, sticky="w")
-        b_ref = T.button(rc, "Wybierz…", self.choose_reference, accent=True, width=86); b_ref.configure(height=24, font=T.font(11, "bold"))
-        b_ref.grid(row=1, column=0, sticky="w", pady=(2, 0))
-        self.clear_ref_btn = T.button(rc, "Wyłącz", self.clear_reference, width=68); self.clear_ref_btn.configure(height=24, font=T.font(11))
-        self.clear_ref_btn.grid(row=1, column=1, sticky="w", padx=(4, 0), pady=(2, 0))
+        rc = ctk.CTkFrame(f2, fg_color=T.PANEL, corner_radius=6)
+        rc.grid(row=5, column=0, sticky="ew", padx=4, pady=(8, 3))
+        T.label(rc, "Wzorzec serii (AI):", 11, anchor="w", weight="bold").pack(side="left", padx=(8, 6), pady=5)
+        self.clear_ref_btn = T.button(rc, "Wyłącz", self.clear_reference, width=68); self.clear_ref_btn.configure(height=24, font=T.font(10))
+        self.clear_ref_btn.pack(side="right", padx=(0, 6), pady=5)
+        b_ref = T.button(rc, "Wybierz wzorzec…", self.choose_reference, accent=True, width=124); b_ref.configure(height=24, font=T.font(10, "bold"))
+        b_ref.pack(side="right", padx=(0, 4), pady=5)
 
-        cc_cell = ctk.CTkFrame(f2, fg_color=T.CARD); cc_cell.grid(row=2, column=1, sticky="ew", padx=4, pady=3)
-        T.label(cc_cell, "ColorChecker (24)", 11, anchor="w", weight="bold").grid(row=0, column=0, columnspan=2, sticky="w")
-        b_cc = T.button(cc_cell, "Z pliku…", self.choose_colorchecker, width=82); b_cc.configure(height=24, font=T.font(11))
-        b_cc.grid(row=1, column=0, sticky="w", pady=(2, 0))
-        b_cc_cur = T.button(cc_cell, "Z kadru", self.calibrate_current_colorchecker, width=74); b_cc_cur.configure(height=24, font=T.font(11))
-        b_cc_cur.grid(row=1, column=1, sticky="w", padx=(4, 0), pady=(2, 0))
+        cc_cell = ctk.CTkFrame(f2, fg_color=T.PANEL, corner_radius=6)
+        cc_cell.grid(row=6, column=0, sticky="ew", padx=4, pady=3)
+        T.label(cc_cell, "ColorChecker (24 pola):", 11, anchor="w", weight="bold").pack(side="left", padx=(8, 6), pady=5)
+        b_cc_cur = T.button(cc_cell, "Z bieżącego kadru", self.calibrate_current_colorchecker, width=112); b_cc_cur.configure(height=24, font=T.font(10))
+        b_cc_cur.pack(side="right", padx=(0, 6), pady=5)
+        b_cc = T.button(cc_cell, "Z pliku…", self.choose_colorchecker, width=78); b_cc.configure(height=24, font=T.font(10))
+        b_cc.pack(side="right", padx=(0, 4), pady=5)
 
-        pr_cell = ctk.CTkFrame(f2, fg_color=T.CARD); pr_cell.grid(row=3, column=0, columnspan=2, sticky="ew", padx=4, pady=3)
+        pr_cell = ctk.CTkFrame(f2, fg_color=T.PANEL, corner_radius=6)
+        pr_cell.grid(row=7, column=0, sticky="ew", padx=4, pady=3)
         pr_cell.grid_columnconfigure(0, weight=1)
-        T.label(pr_cell, "Wzorzec TEGO zdjęcia (indywidualny / Pula Wzorców)", 11, anchor="w", weight="bold").grid(row=0, column=0, columnspan=3, sticky="w")
+        T.label(pr_cell, "Wzorzec TEGO zdjęcia (indywidualny / Pula Wzorców AI)", 11, anchor="w", weight="bold").grid(
+            row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 2)
+        )
         self.photo_ref_menu = ctk.CTkOptionMenu(
             pr_cell, values=["Domyślny serii", "Samodzielne (brak)"], command=self._on_photo_ref_menu,
-            width=182, height=24, fg_color=T.BTN, button_color=T.BTN, button_hover_color=T.BTN_HOVER,
+            width=166, height=24, fg_color=T.BTN, button_color=T.BTN, button_hover_color=T.BTN_HOVER,
             text_color=T.TEXT, font=T.font(10), dropdown_font=T.font(11), corner_radius=6
         )
         self.photo_ref_menu.set("Domyślny serii")
-        self.photo_ref_menu.grid(row=1, column=0, sticky="ew", pady=(2, 0))
-        b_pref = T.button(pr_cell, "▸ Własny…", self.choose_photo_reference, accent=True, width=84); b_pref.configure(height=24, font=T.font(10, "bold"))
-        b_pref.grid(row=1, column=1, sticky="e", padx=(4, 0), pady=(2, 0))
-        b_auto_pool = T.button(pr_cell, "★ Auto z puli", lambda: self.library.auto_match_pool_references(), width=92)
+        self.photo_ref_menu.grid(row=1, column=0, sticky="ew", padx=(8, 4), pady=(0, 5))
+        b_pref = T.button(pr_cell, "▸ Własny…", self.choose_photo_reference, accent=True, width=78); b_pref.configure(height=24, font=T.font(10, "bold"))
+        b_pref.grid(row=1, column=1, sticky="e", padx=(0, 4), pady=(0, 5))
+        b_auto_pool = T.button(pr_cell, "★ Auto z puli", lambda: self.library.auto_match_pool_references(), width=88)
         b_auto_pool.configure(height=24, font=T.font(10))
-        b_auto_pool.grid(row=1, column=2, sticky="e", padx=(4, 0), pady=(2, 0))
+        b_auto_pool.grid(row=1, column=2, sticky="e", padx=(0, 8), pady=(0, 5))
 
         self.ref_info_lbl = T.label(
             f2,
             "Edytor działa samodzielnie bez wzorca. Możesz przypisać osobny wzorzec każdemu zdjęciu lub dopasować wzorce z puli (AI).",
-            10, T.MUTED, anchor="w", justify="left", wraplength=380
+            10, T.MUTED, anchor="w", justify="left", wraplength=352
         )
-        self.ref_info_lbl.grid(row=4, column=0, columnspan=2, sticky="w", padx=4, pady=(4, 2))
+        self.ref_info_lbl.grid(row=8, column=0, sticky="w", padx=6, pady=(6, 2))
         f0.lift()
 
-        # ---- Right Dock Section 3: Local Tools Drawer (Pędzel D&B | Kadr) ----
-        tools = ctk.CTkFrame(dock, fg_color=T.CARD)
-        tools.pack(fill="x", padx=8, pady=(2, 2))
-        self.tool_tabs = T.segmented(tools, TOOLS, command=self._tool_tab); self.tool_tabs.configure(height=26, font=T.font(11))
-        self.tool_tabs.set(TOOLS[0]); self.tool_tabs.pack(fill="x")
-        area = ctk.CTkFrame(tools, fg_color=T.CARD, width=TOOL_W, height=TOOL_H); area.pack(fill="x", pady=(4, 0)); area.pack_propagate(False)
-        br = ctk.CTkFrame(area, fg_color=T.CARD); cr = ctk.CTkFrame(area, fg_color=T.CARD)
-        for f in (br, cr): f.place(x=0, y=0, relwidth=1, relheight=1)
+        # ---- Collapsible Local Tool Drawer (Pędzel D&B | Kadr) — Hidden by default, opens on click/shortcut! ----
+        self.tool_drawer = ctk.CTkFrame(sl_area, fg_color=T.PANEL, width=TOOL_W, height=TOOL_H, corner_radius=8,
+                                        border_width=1, border_color=T.ACCENT)
+        self.tool_drawer.pack_propagate(False)
+        br = ctk.CTkFrame(self.tool_drawer, fg_color=T.PANEL); cr = ctk.CTkFrame(self.tool_drawer, fg_color=T.PANEL)
+        for f in (br, cr): f.place(x=6, y=4, relwidth=0.965, relheight=0.94)
         self.tool_frames = {TOOLS[0]: br, TOOLS[1]: cr}
         br.grid_columnconfigure(1, weight=1)
         self.brush_mode = T.segmented(br, BRUSH_MODES, command=lambda v: self.view_res.delete("cursor"))
         self.brush_mode.configure(height=24, font=T.font(11)); self.brush_mode.set(BRUSH_MODES[0])
         self.brush_mode.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 3))
-        bb = ctk.CTkFrame(br, fg_color=T.CARD); bb.grid(row=0, column=2, sticky="e", padx=(4, 0), pady=(0, 3))
-        b_bu = T.button(bb, "Cofnij", self.undo_stroke, width=52); b_bu.configure(height=24, font=T.font(10)); b_bu.pack(side="left")
-        b_bc = T.button(bb, "Wyczyść", self.clear_strokes, width=56); b_bc.configure(height=24, font=T.font(10)); b_bc.pack(side="left", padx=(3, 0))
+        bb = ctk.CTkFrame(br, fg_color=T.PANEL); bb.grid(row=0, column=2, sticky="e", padx=(4, 0), pady=(0, 3))
+        b_bu = T.button(bb, "Cofnij", self.undo_stroke, width=46); b_bu.configure(height=23, font=T.font(10)); b_bu.pack(side="left")
+        b_bc = T.button(bb, "Wyczyść", self.clear_strokes, width=52); b_bc.configure(height=23, font=T.font(10)); b_bc.pack(side="left", padx=2)
+        b_bx = T.button(bb, "✕", self.close_tool_drawer, width=24); b_bx.configure(height=23, font=T.font(10)); b_bx.pack(side="left")
         self.brush_vals = {}
         def brow(r, text, lo, hi, val, key):
             T.label(br, text, 11, T.MUTED).grid(row=r, column=0, sticky="w")
-            box = ctk.CTkFrame(br, fg_color=T.CARD, width=50, height=18); box.grid(row=r, column=2, sticky="e", padx=(4, 0)); box.pack_propagate(False)
+            box = ctk.CTkFrame(br, fg_color=T.PANEL, width=50, height=18); box.grid(row=r, column=2, sticky="e", padx=(4, 0)); box.pack_propagate(False)
             lab = T.label(box, "", 11, T.MUTED, anchor="e"); lab.pack(fill="both", expand=True); self.brush_vals[key] = lab
-            sl_ = T.slider(br, lo, hi, width=180, command=lambda v: self._brush_label(key)); sl_.configure(height=13); sl_.set(val)
+            sl_ = T.slider(br, lo, hi, width=170, command=lambda v: self._brush_label(key)); sl_.configure(height=13); sl_.set(val)
             sl_.grid(row=r, column=1, sticky="ew", padx=(6, 0), pady=1)
             return sl_
         self.brush_size = brow(1, "Rozmiar", 0, 1, 0.45, "size")
         self.brush_soft = brow(2, "Miękkość", 0, 100, 50, "soft")
         self.brush_str = brow(3, "Przepływ", 5, 100, 40, "flow")
         for k in self.brush_vals: self._brush_label(k)
-        T.label(br, "[ ] lub Alt+kółko: rozmiar · Ctrl+kółko: zoom", 10, T.MUTED).grid(row=4, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        T.label(br, "[ ] lub Alt+kółko: rozmiar · kliknij ✕ lub zakładkę, aby zwinąć", 10, T.MUTED).grid(row=4, column=0, columnspan=3, sticky="w", pady=(2, 0))
 
-        # crop & straighten
+        # crop & straighten inside collapsible drawer
         cr.grid_columnconfigure(1, weight=1)
         T.label(cr, "Proporcje", 11, T.MUTED).grid(row=0, column=0, sticky="w")
         self.aspect_menu = ctk.CTkOptionMenu(cr, values=list(G.ASPECTS.values()), command=self._aspect, width=110, height=24,
                                              fg_color=T.BTN, button_color=T.BTN, button_hover_color=T.BTN_HOVER, text_color=T.TEXT,
                                              font=T.font(11), dropdown_font=T.font(11), corner_radius=6)
         self.aspect_menu.grid(row=0, column=1, sticky="w", padx=(6, 0))
-        b = T.button(cr, "Pion/Poziom", self._flip_aspect, width=86); b.configure(height=24, font=T.font(10)); b.grid(row=0, column=2, sticky="e")
+        cr_top_r = ctk.CTkFrame(cr, fg_color=T.PANEL); cr_top_r.grid(row=0, column=2, sticky="e")
+        b = T.button(cr_top_r, "Pion/Poziom", self._flip_aspect, width=78); b.configure(height=23, font=T.font(10)); b.pack(side="left", padx=(0, 2))
+        b_cx = T.button(cr_top_r, "Gotowe ✕", self.close_tool_drawer, accent=True, width=64); b_cx.configure(height=23, font=T.font(10, "bold")); b_cx.pack(side="left")
         T.label(cr, "Prostowanie", 11, T.MUTED).grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.angle = T.slider(cr, -45, 45, number_of_steps=900, width=140, command=self._angle)
         self.angle.grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=(6, 0))
-        box = ctk.CTkFrame(cr, fg_color=T.CARD, width=54, height=18); box.grid(row=1, column=2, sticky="e", pady=(6, 0)); box.pack_propagate(False)
+        box = ctk.CTkFrame(cr, fg_color=T.PANEL, width=54, height=18); box.grid(row=1, column=2, sticky="e", pady=(6, 0)); box.pack_propagate(False)
         self.angle_val = T.label(box, "", 11, T.MUTED, anchor="e"); self.angle_val.pack(fill="both", expand=True)
-        cb = ctk.CTkFrame(cr, fg_color=T.CARD); cb.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        cb = ctk.CTkFrame(cr, fg_color=T.PANEL); cb.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(6, 0))
         self.hline_btn = T.button(cb, "Linia horyzontu", self.toggle_hline, width=116); self.hline_btn.configure(height=24, font=T.font(10)); self.hline_btn.pack(side="left")
         b_rc = T.button(cb, "Resetuj kadr", self.reset_crop, width=96); b_rc.configure(height=24, font=T.font(10)); b_rc.pack(side="left", padx=6)
-        T.label(cr, "Przeciągnij na wyniku: kadr · Enter: gotowe · Esc: wyjście", 10, T.MUTED,
+        T.label(cr, "Przeciągnij na wyniku: kadr · Enter/Esc: zamknij narzędzie", 10, T.MUTED,
                 justify="left").grid(row=3, column=0, columnspan=3, sticky="w", pady=(4, 0))
         br.lift()
 
-        # ---- Right Dock Section 4: Context Help Box ('Podpowiedź PRO') ----
-        tip_box = ctk.CTkFrame(dock, fg_color=T.PANEL, corner_radius=8, height=48)
-        tip_box.pack(fill="x", padx=8, pady=(2, 6))
+        # ---- Right Dock Section 4: Subtle Context Tip Box ('Podpowiedź PRO') ----
+        tip_box = ctk.CTkFrame(dock, fg_color=T.PANEL, corner_radius=7, height=44)
+        tip_box.pack(fill="x", padx=8, pady=(2, 3))
         tip_box.pack_propagate(False)
         self.pro_tip_lbl = T.label(
             tip_box,
-            "▸ Podpowiedź PRO: Najedź na dowolny suwak, aby zobaczyć wskazówkę kierunkową (np. Odcień skóry: ◀ Róż/Czerwień ↔ Złoty/Żółty ▶). Dwuklik zeruje suwak.",
-            10, T.MUTED, anchor="w", justify="left", wraplength=384
+            "▸ Układ Lightroom Classic (1 kolumna): Najedź na suwak, aby zobaczyć kierunek działania. Dwuklik zeruje suwak.",
+            10, T.MUTED, anchor="w", justify="left", wraplength=354
         )
-        self.pro_tip_lbl.pack(fill="both", expand=True, padx=8, pady=4)
+        self.pro_tip_lbl.pack(fill="both", expand=True, padx=7, pady=3)
 
-        self.status = T.label(self, "", 12, T.MUTED); self.status.pack(fill="x", pady=4)
+        # ---- Right Dock Section 5: Lightroom Bottom History & Sync Footer ----
+        foot = ctk.CTkFrame(dock, fg_color=T.CARD)
+        foot.pack(fill="x", padx=8, pady=(1, 4))
+        s_row = ctk.CTkFrame(foot, fg_color=T.CARD); s_row.pack(fill="x", pady=(0, 3))
+        T.label(s_row, "Zdjęcie:", 10, T.MUTED).pack(side="left")
+        self.override_lbl = T.label(s_row, "serii", 10, T.MUTED); self.override_lbl.pack(side="left", padx=(3, 6))
+        b2 = T.button(s_row, "Ustaw jako serię", self.make_series_default, width=96); b2.configure(height=22, font=T.font(10)); b2.pack(side="right")
+        b1 = T.button(s_row, "Przywróć z serii", self.reset_to_series, width=92); b1.configure(height=22, font=T.font(10)); b1.pack(side="right", padx=(0, 4))
+
+        act = ctk.CTkFrame(foot, fg_color=T.CARD); act.pack(fill="x")
+        def sbtn(text, cmd, w):
+            b_ = T.button(act, text, cmd, width=w); b_.configure(height=24, font=T.font(10), corner_radius=5); b_.pack(side="left", padx=(0, 3)); return b_
+        self.undo_btn = sbtn("Cofnij", self.undo, 54)
+        self.redo_btn = sbtn("Ponów", self.redo, 54)
+        sbtn("Kopiuj", self.copy_params, 54)
+        self.paste_btn = sbtn("Wklej", self.paste_params, 52)
+        b_z = T.button(act, "Zeruj wszystko", self.reset_adjustments, width=92)
+        b_z.configure(height=24, font=T.font(10), corner_radius=5); b_z.pack(side="right")
+
+        self.status = T.label(self, "", 12, T.MUTED); self.status.pack(fill="x", pady=3)
         self._load_params_into_ui(self.params); self._update_status()
 
     def _set_pro_tip(self, key: str):
         if hasattr(self, "pro_tip_lbl") and key in PRO_TIPS:
-            self.pro_tip_lbl.configure(text=f"▸ {PRO_TIPS[key]}")
+            hint_str = ""
+            if key in SLIDER_HINTS:
+                l_t, r_t, _, _ = SLIDER_HINTS[key]
+                hint_str = f" [{l_t}  ↔  {r_t}]"
+            self.pro_tip_lbl.configure(text=f"▸ {PRO_TIPS[key]}{hint_str}")
 
     # ================= threading =================
     def _worker(self):
@@ -1070,19 +1126,37 @@ class RetuszApp(ctk.CTk):
 
     def _tool_tab(self, name):
         self.tool = "crop" if name == TOOLS[1] else "brush"
+        self.tool_open = True
+        if hasattr(self, "tool_drawer"):
+            self.tool_drawer.place(x=0, y=0, relwidth=1)
+            self.tool_drawer.lift()
         self.tool_frames[name].lift(); self.hline_on = False; self._hline = None; self._style_hline()
         if self.tool == "crop": self.toggle_pick(False); self.view_res.delete("cursor")
         self.redraw_result(); self._draw_crop_overlay()
 
+    def close_tool_drawer(self):
+        self.tool_open = False
+        self.tool = "brush"
+        self.hline_on = False; self._hline = None; self._style_hline()
+        if hasattr(self, "tool_drawer"):
+            self.tool_drawer.place_forget()
+        if hasattr(self, "tool_tabs"):
+            self.tool_tabs.set(TOOLS[0])
+        self.redraw_result(); self._draw_crop_overlay()
+
     def toggle_crop_tool(self):
-        name = TOOLS[0] if self.tool == "crop" else TOOLS[1]; self.tool_tabs.set(name); self._tool_tab(name)
+        if self.tool == "crop":
+            self.close_tool_drawer()
+        else:
+            self.tool_tabs.set(TOOLS[1]); self._tool_tab(TOOLS[1])
 
     def _crop_done(self):
-        if self.tool == "crop": self.toggle_crop_tool()
+        if self.tool == "crop" or self.tool_open:
+            self.close_tool_drawer()
 
     def _escape(self):
         if self.picking: self.toggle_pick(False); self._update_status()
-        elif self.tool == "crop": self.toggle_crop_tool()
+        elif self.tool == "crop" or self.tool_open: self.close_tool_drawer()
 
     def _key(self, fn):
         if isinstance(self.focus_get(), ctk.CTkEntry): return
@@ -1205,7 +1279,29 @@ class RetuszApp(ctk.CTk):
 
     # ================= controls =================
     def _slider_tab(self, name):
+        if self.tool_open:
+            self.close_tool_drawer()
+        canon = _TAB_ALIASES.get(name, name)
+        if hasattr(self, "slider_tabs") and canon in SLIDER_TABS and self.slider_tabs.get() != canon:
+            self.slider_tabs.set(canon)
         self.slider_frames[name].lift()
+
+    def auto_tone_ai(self):
+        if self.src_prev is None:
+            self._set_status("Najpierw otwórz zdjęcie."); return
+        self._commit_history()
+        faces_n = self.fit.faces_n if self.fit is not None else ()
+        auto = TN.auto_tone_params(self.src_prev, faces_n=faces_n)
+        for k, v in auto.items():
+            setattr(self.params, k, float(v))
+        self.detail_raw = None; self.view_res.detail = None
+        self._load_params_into_ui(self.params)
+        self._changed(discrete=True)
+        ml_msg = f" · Światło mieszane {int(round(self.params.mixed_light*100))}%" if self.params.mixed_light > 0.05 else ""
+        self._set_status(
+            f"★ Auto Ton AI: Ekspozycja {self.params.exposure:+.2f} EV · Cienie {int(round(self.params.shadows*100)):+d} · "
+            f"Światła {int(round(self.params.highlights*100)):+d}{ml_msg} (analiza twarzy i histogramu OKLab).".replace(".", ",")
+        )
 
     def _val_color(self, key, param_val):
         return T.TEXT if abs(param_val - getattr(_DEFAULTS, key)) > 1e-3 else T.MUTED

@@ -1,10 +1,10 @@
-# Retusz 0.7.0
+# Retusz 0.8.0
 
-Aplikacja na Windows: pełnoprawny edytor portretowy z **Prawym Dokiem Inspektora w stylu Adobe Lightroom / Capture One Pro**, modułami **Biblioteka (G)** i **Edycja (D)**, obróbką tonalną i barwną w przestrzeni OKLab
+Aplikacja na Windows: profesjonalny edytor portretowy z **autentycznym układem Adobe Lightroom Classic (1 kolumna szerokich suwaków, składana szuflada narzędzi, dolny pasek Loupe Toolbar)**, modułami **Biblioteka (G)** i **Edycja (D)**, jednoklikowym **`★ Auto Ton AI`**, **Color Gradingiem OKLab (`Ciepło cieni`, `Blask świateł`) i Selektywnym Mikserem HSL OKLCh (`Zieleń (Plener)`, `Błękit (Niebo/Biel)`)**, obróbką tonalną i barwną w przestrzeni OKLab
 (Ekspozycja EV, Kontrast, Jasność półtonów Capture One, Dehaze, Światła/Cienie, Biele/Czernie, Balans bieli Bradford CAT, Przejrzystość Fast LLF),
 kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**, obsługą **wielu wzorców kolorystycznych w jednej serii**, **importem wybranych zdjęć z folderu**,
-**dwuosiowym oświetleniem 3D (`Światło 3D: Lewo ↔ Prawo` oraz `Światło 3D: Dół ↔ Góra`)**, **Separacją tła 3D (`bg_exposure`)**,
-**wizualną diagnostyką `Maska AI (M)` (maska skóry, obrys 3D, ramki twarzy i 5 punktów oczu/nosa/ust)**, kolorowymi podpowiedziami kierunkowymi pod suwakami (`◀ Róż / Czerwień ↔ Złoty / Żółty ▶`),
+**dwuosiowym oświetleniem 3D (`Światło 3D: Poziom` oraz `Światło 3D: Pion`)**, **Separacją tła 3D (`bg_exposure`)**,
+**wizualną diagnostyką `Maska AI (M)` (maska skóry, obrys 3D, ramki twarzy w okularach i 5 punktów oczu/nosa/ust)**,
 zakładką **Detal i Ostrość** (4 tryby wyostrzania: Portret z ochroną skóry, Dekonwolucja RL obiektywu, Krawędzie Clamped USM, Miękki blask + Struktura i Odszumianie OKLab),
 biofizyczną optyką skóry (**Melanina/Hemoglobina**, **Redukcja połysku SUV De-Shine**, **Niedoskonałości Auto-Heal**, **Oczy i zęby**),
 **Wektorskopem Linii Skóry OKLCh (52°)** oraz oknem **Eksportuj jako… (TIFF/PNG 16-bit, WebP, JPG 4:4:4, ProPhoto RGB, Display P3, Adobe RGB, sRGB)**. Autor: Jack4B.
@@ -12,6 +12,27 @@ biofizyczną optyką skóry (**Melanina/Hemoglobina**, **Redukcja połysku SUV D
 ## Kontrola jakości
 
 `tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--colorchecker` sprawdza detekcję i kalibrację 24 pól ColorChecker (średnie ΔE₀₀ < 1,2, skóra < 1,0, szarości < 0,8).
+
+### 0.8.0
+- **Autentyczny układ Adobe Lightroom Classic — 1 kolumna szerokich suwaków i zero szumu wizualnego** (`retusz/gui/app.py`):
+  - **Jedna pionowa kolumna suwaków w stylu Lightroom Classic**: zastąpiono dwukolumnową siatkę wąskich suwaków czytelnym układem `[Etykieta po lewej (128 px)] ─── [Szeroki suwak (176 px)] ─── [Wartość po prawej (52 px)]`;
+  - **Subtelny 3-pikselowy pasek gradientu wyłącznie pod suwakami barwnymi** (`Temperatura`, `Odcień`, `Odcień skóry`, `Ciepło cieni`, `Blask świateł`, `Zieleń`, `Błękit`) zamiast powtarzających się podpisów tekstowych pod każdym suwakiem;
+  - **Składana szuflada narzędzi lokalnych (`Pędzel D&B` | `Kadr`)**: domyślnie zwinięta pod paskiem narzędzi pod histogramem — otwiera się wyłącznie po aktywowaniu pędzla lub kadrowania (`C`) i zamyka przyciskiem `Gotowe ✕`, `Enter`, `Esc` lub po przełączeniu zakładki;
+  - **Dolny pasek narzędzi pod zdjęciem (Lightroom Loupe Toolbar `T`)**: tryby widoku (`Wynik | Przed | Po | Podział | Z wzorcem`), `Przed/Po (\)`, ocena gwiazdkowa `0..5★` oraz zoom (`Dopasuj`, `100%`, `%`) przeniesione bezpośrednio pod podgląd zdjęcia;
+  - **Dolna stopka prawego panelu (Lightroom Footer)**: `Cofnij | Ponów | Kopiuj | Wklej | Zeruj wszystko` oraz `Przywróć z serii | Ustaw jako serię`.
+- **`★ Auto Ton AI` — jednoklikowy balans ekspozycji i rozpiętości tonalnej pod twarz** (`retusz/engine/tone.py:auto_tone_params`):
+  - analizuje percentyle luminancji sceny ($P_1, P_{15}, P_{50}, P_{88}, P_{99}$) oraz jasność wykrytych twarzy w przestrzeni OKLab (celując w naturalną jasność skóry $L_{\text{OKLab}} \approx 0{,}72$ z ochroną przed przepaleniem świateł) i automatycznie ustawia `Ekspozycję`, `Kontrast`, `Światła`, `Cienie`, `Biele`, `Czernie` oraz `Jaskrawość`.
+- **Color Grading OKLab (Split Toning) i Selektywny Mikser HSL OKLCh z pełną izolacją skóry** (`retusz/engine/tone.py:apply_color_grading_oklab`):
+  - **`Ciepło cieni` (`shadow_tone`, `-100..+100`)**: chłodny kinowy błękit cieni ↔ miękki ciepły bursztyn cieni;
+  - **`Blask świateł` (`highlight_tone`, `-100..+100`)**: chłodne światła ↔ kremowy złoty blask świateł;
+  - **`Zieleń (Plener)` (`hsl_green`, `-100..+100`)**: zamienia jaskrawą zieleń trawy i liści w szlachetną, filmową zieleń lub ożywia roślinność przy 100% ochronie odcienia skóry ($50^\circ$ OKLCh);
+  - **`Błękit (Niebo/Biel)` (`hsl_blue`, `-100..+100`)**: usuwa niebieski/cyjanowy zafarb z białych koszul i sukni ślubnych lub pogłębia błękit nieba.
+- **`Światło mieszane (LED / Błysk)` — ratowanie twarzy oświetlonej dwoma różnymi światłami (pół twarzy białej, pół czerwonej)** (`retusz/engine/skin_physics.py:mixed_light_gain`, `mixed_light_face_mask`):
+  - **anatomiczna maska twarzy odporna na skrajne zafarby (`mixed_light_face_mask`)**: wykorzystuje geometrię i 5 punktów anatomicznych YuNet oraz filtr prowadzący po strukturze luminancji, dzięki czemu obejmuje obie połówki twarzy nawet wtedy, gdy jedna połowa jest kredowobiała od flesza ($Cr \approx 128$), a druga intensywnie czerwona od LED-ów na sali ($Cr > 190$);
+  - **dwuźródłowa adaptacja chromatyczna w OKLab/OKLCh (`mixed_light_gain`, Hsu et al., SIGGRAPH 2008)**: estymuje wieloskalowe pole lokalnego oświetlenia na twarzy ($\sigma_1 = f_w/18$, $\sigma_2 = f_w/6$), sprowadza zarówno czerwoną, jak i białą połówkę twarzy do jednolitego, naturalnego odcienia skóry ($52^\circ$ OKLCh) oraz wyrównuje asymetrię jasności przy 100% zachowaniu tekstury porów;
+  - **`★ Auto Ton AI`** automatycznie wykrywa rozszczepione oświetlenie mieszane na twarzy i dobiera parametr `Światło mieszane (LED)`.
+- **Ulepszona detekcja wielu twarzy w okularach (`YuNet 0.45`)** (`retusz/engine/faces.py`):
+  - niezawodnie wykrywa drugie i kolejne twarze w parach/grupach nawet przy założonych grubych lub imprezowych okularach.
 
 ### 0.7.0
 - **Układ interfejsu w stylu Adobe Lightroom / Capture One Pro (`Prawy Dok Inspektora`)** (`retusz/gui/app.py`):
