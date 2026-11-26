@@ -39,14 +39,19 @@ class Params:
     sharpen_mode: str = "portrait"  # 'Tryb wyostrzania': portrait | rl | edges | soft
     denoise: float = 0.0            # 'Odszumianie' 0..1 (edge-preserving OKLab chroma + luma denoise)
     light_angle: float | None = None  # 'Kierunek światła' in degrees, None = auto (from the reference)
+    light_x: float = 0.0            # 'Światło 3D: Lewo ↔ Prawo' -1..1
+    light_y: float = 0.0            # 'Światło 3D: Dół ↔ Góra' -1..1
+    bg_exposure: float = 0.0        # 'Separacja tła 3D' -1..1 (3D background exposure offset)
     saturation: float = 0.0         # 'Nasycenie' -1..1
     vibrance: float = 0.0           # 'Jaskrawość' -1..1 (OKLab, boosts dull colours, spares skin)
     skin_even: float = 0.3          # 'Równanie skóry' 0..1 (chromophore hemoglobin/melanin + mixed-light evening)
     skin_cast: float = 0.0          # 'Czysta skóra' 0..1 (OKLCh skin-locus cast reduction)
-    skin_hue: float = 0.0           # 'Odcień skóry' -1..1 (OKLCh skin hue angle rotation)
+    skin_hue: float = 0.0           # 'Odcień skóry' -1..1 (OKLCh skin hue angle rotation: - = Róż/Czerwień, + = Złoty/Żółty)
     deshine: float = 0.0            # 'Redukcja połysku' 0..1 (Dichromatic SUV skin specular removal)
     blemish: float = 0.0            # 'Niedoskonałości' 0..1 (Two-band pore-preserving blemish auto-heal)
     eyes_teeth: float = 0.0         # 'Oczy i zęby' 0..1 (Anatomical iris/sclera/teeth enhancement)
+    mask_hue_tol: float = 0.0       # 'Zasięg odcienia maski AI' -1..1 (Mahalanobis skin colour & shadow range)
+    mask_protect: float = 0.0       # 'Ochrona oczu i ust (AI)' 0..1 (Anatomical landmark eye/lip mask exclusion)
     wide: float = 0.0               # 'Pełne barwy' 0..1: colours as sRGB numbers look on a wide-gamut (AdobeRGB) monitor
     temp: float = 0.0               # 'Temperatura' -1..1 (white balance, Bradford CAT)
     tint: float = 0.0               # 'Odcień' -1..1 (+ = magenta)
@@ -68,10 +73,11 @@ class Params:
         if p.light_angle is not None: p.light_angle = float(p.light_angle) % 360
         p.exposure = float(np.clip(p.exposure, -2.0, 2.0))
         for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even", "skin_cast",
-                  "deshine", "blemish", "eyes_teeth", "sharpen_amount", "denoise", "wide"):
+                  "deshine", "blemish", "eyes_teeth", "mask_protect", "sharpen_amount", "denoise", "wide"):
             setattr(p, k, float(np.clip(getattr(p, k), 0, 1)))
         for k in ("contrast", "brightness", "dehaze", "texture", "shadows", "highlights", "whites", "blacks",
-                  "clarity", "saturation", "vibrance", "skin_hue", "temp", "tint"):
+                  "clarity", "saturation", "vibrance", "skin_hue", "mask_hue_tol", "temp", "tint",
+                  "light_x", "light_y", "bg_exposure"):
             setattr(p, k, float(np.clip(getattr(p, k), -1, 1)))
         if p.sharpen_mode not in DET.SHARPEN_MODES: p.sharpen_mode = "portrait"
         p.rating = int(np.clip(int(p.rating or 0), 0, 5))
@@ -120,14 +126,16 @@ class Fit:
 
 MASK_SIDE = 400   # skin mask working size (long side) for every resolution
 
-def skin_mask_fixed(src, faces_n, qh, qw, subject=None):
+def skin_mask_fixed(src, faces_n, qh, qw, subject=None, hue_tol: float = 0.0, protect_features: float = 0.0, lms_n=None):
     """Skin mask computed at a fixed working size and returned at (qh, qw). Resolution independent on
     purpose: with noisy input (RAW, no in-camera noise reduction) the colour test passed far more shadow
     pixels at full resolution than in the preview, so the export's shadows got the skin LUT."""
     H, W = src.shape[:2]; s = min(1.0, MASK_SIDE/max(H, W))
     mw, mh = max(2, round(W*s)), max(2, round(H*s))
     small = src if (mh, mw) == (H, W) else cv2.resize(src, (mw, mh), interpolation=cv2.INTER_AREA)
-    m = F.skin_mask(small, [f*mw for f in faces_n], subject=subject).astype(np.float32)
+    lms_scaled = [np.asarray(l, np.float32) * mw for l in lms_n] if lms_n else None
+    m = F.skin_mask(small, [f*mw for f in faces_n], subject=subject,
+                    hue_tol=hue_tol, protect_features=protect_features, lms=lms_scaled).astype(np.float32)
     return m if (mh, mw) == (qh, qw) else cv2.resize(m, (qw, qh), interpolation=cv2.INTER_LINEAR)
 
 def brush_map(strokes, h, w):
@@ -439,23 +447,29 @@ class Engine:
         lut_bg, lut_sk = self.bake(fit, p)
         q = cv2.resize(src, (qw, qh), interpolation=cv2.INTER_AREA)
         subj = fit.relight.fg if (fit.relight is not None and getattr(fit.relight, "fg", None) is not None) else None
-        mq_raw = skin_mask_fixed(src, fit.faces_n, qh, qw, subject=subj)
+        mq_raw = skin_mask_fixed(src, fit.faces_n, qh, qw, subject=subj,
+                                 hue_tol=p.mask_hue_tol, protect_features=p.mask_protect,
+                                 lms_n=getattr(fit, "lms_n", None))
         skin_w = max(p.skin, 1.0 if (p.skin_cast > 0 or abs(p.skin_hue) > 1e-4) else 0.0)
         mq = mq_raw*skin_w
         gain = np.zeros((qh, qw, 3), np.float32)
         need_vig = p.vignette > 0 and np.any(fit.vig_diff < 0)
         need_3d = p.plastic > 0 and fit.relight is not None
+        need_bg = abs(p.bg_exposure) > 1e-4 and fit.relight is not None
         need_even = p.skin_even > 0 and fit.faces_n and mq_raw.max() > 0.3
         need_deshine = p.deshine > 0 and mq_raw.max() > 0.25
         need_clarity = abs(p.clarity) > 1e-4
-        if need_vig or need_3d or need_even or need_deshine or need_clarity:
+        if need_vig or need_3d or need_bg or need_even or need_deshine or need_clarity:
             base_q = R.render(q, lut_bg, lut_sk, mq, gain); lab_q = C.to_lab(base_q); Lq = lab_q[..., 0]
         if need_even:
             gain += skin_even_gain(base_q, lab_q, mq_raw, [f*qw for f in fit.faces_n], p.skin_even)
         if need_deshine:
             gain += SP.deshine_gain(base_q, mq_raw, p.deshine)
         if need_3d:
-            gain += fit.relight.gain(qh, qw, Lq, p.plastic, p.light_angle, rgb_q=base_q)[..., None]
+            gain += fit.relight.gain(qh, qw, Lq, p.plastic, p.light_angle, rgb_q=base_q,
+                                     light_x=p.light_x, light_y=p.light_y)[..., None]
+        if need_bg:
+            gain += fit.relight.bg_gain(qh, qw, Lq, p.bg_exposure, skin_mask=mq_raw, rgb_q=base_q)[..., None]
         if need_clarity:
             gain += TN.clarity_gain(Lq, mq_raw, p.clarity)[..., None]
         if need_vig:

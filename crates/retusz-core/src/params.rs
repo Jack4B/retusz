@@ -35,6 +35,10 @@ pub struct Params {
     #[serde(default)]
     pub eyes_teeth: f32,     //  0.0 .. +1.0 ('Oczy i zęby' Anatomical iris/sclera/teeth enhancer)
     #[serde(default)]
+    pub mask_hue_tol: f32,   // -1.0 .. +1.0 ('Maska AI: Zasięg odcienia')
+    #[serde(default)]
+    pub mask_protect: f32,   //  0.0 .. +1.0 ('Maska AI: Ochrona oczu i ust')
+    #[serde(default)]
     pub exposure: f32,       // -2.0 .. +2.0 EV
     #[serde(default)]
     pub contrast: f32,       // -1.0 .. +1.0
@@ -72,6 +76,12 @@ pub struct Params {
     pub plastic: f32,        //  0.0 .. +1.0
     #[serde(default)]
     pub light_angle: Option<f32>,
+    #[serde(default)]
+    pub light_x: f32,        // -1.0 .. +1.0 ('Światło 3D: Lewo ↔ Prawo')
+    #[serde(default)]
+    pub light_y: f32,        // -1.0 .. +1.0 ('Światło 3D: Dół ↔ Góra')
+    #[serde(default)]
+    pub bg_exposure: f32,    // -1.0 .. +1.0 ('Separacja tła 3D')
     #[serde(default, alias = "vivid")]
     pub wide: f32,           //  0.0 .. +1.0
     #[serde(default)]
@@ -103,6 +113,8 @@ impl Default for Params {
             deshine: 0.0,
             blemish: 0.0,
             eyes_teeth: 0.0,
+            mask_hue_tol: 0.0,
+            mask_protect: 0.0,
             exposure: 0.0,
             contrast: 0.0,
             brightness: 0.0,
@@ -122,6 +134,9 @@ impl Default for Params {
             db: 0.40,
             plastic: 0.30,
             light_angle: None,
+            light_x: 0.0,
+            light_y: 0.0,
+            bg_exposure: 0.0,
             wide: 0.0,
             temp: 0.0,
             tint: 0.0,

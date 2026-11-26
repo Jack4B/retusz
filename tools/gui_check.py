@@ -133,12 +133,15 @@ def new_features():
     from retusz.engine import geometry as G, wb as WB
     import numpy as np
     g0 = geom(); v = app.view_res
-    # histogram + clipping overlay
+    # histogram + clipping overlay + AI face/landmark/skin mask overlay
     hist_ok = app.frame is not None and app.hist.find_all()
     app.toggle_clip(True); pump(5); grab("15_przepalenia.png")
     print("histogram drawn:", bool(hist_ok), "| clip label:", app.clip_lbl.cget("text"))
     app.toggle_clip(False); pump(3)
     if geom() != g0: print("LAYOUT CHANGED by clipping toggle"); ok = False
+    app.toggle_mask(True); pump(5); grab("15b_maska_ai.png")
+    app.toggle_mask(False); pump(3)
+    if geom() != g0: print("LAYOUT CHANGED by AI mask toggle"); ok = False
     # eyedropper: on a bright neutral-ish area of the result frame
     import cv2
     f = app.frame.astype(np.float32); sat = f.max(-1) - f.min(-1); lum = f.mean(-1)
