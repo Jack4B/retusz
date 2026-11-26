@@ -1,15 +1,29 @@
-# Retusz 0.6.0
+# Retusz 0.7.0
 
-Aplikacja na Windows: pełnoprawny edytor portretowy z modułami **Biblioteka (G)** i **Edycja (D)**, obróbką tonalną i barwną w przestrzeni OKLab
+Aplikacja na Windows: pełnoprawny edytor portretowy z **Prawym Dokiem Inspektora w stylu Adobe Lightroom / Capture One Pro**, modułami **Biblioteka (G)** i **Edycja (D)**, obróbką tonalną i barwną w przestrzeni OKLab
 (Ekspozycja EV, Kontrast, Jasność półtonów Capture One, Dehaze, Światła/Cienie, Biele/Czernie, Balans bieli Bradford CAT, Przejrzystość Fast LLF),
-kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**, obsługą **wielu wzorców kolorystycznych w jednej serii**,
+kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**, obsługą **wielu wzorców kolorystycznych w jednej serii**, **importem wybranych zdjęć z folderu**,
+**dwuosiowym oświetleniem 3D (`Światło 3D: Lewo ↔ Prawo` oraz `Światło 3D: Dół ↔ Góra`)**, **Separacją tła 3D (`bg_exposure`)**,
+**wizualną diagnostyką `Maska AI (M)` (maska skóry, obrys 3D, ramki twarzy i 5 punktów oczu/nosa/ust)**, kolorowymi podpowiedziami kierunkowymi pod suwakami (`◀ Róż / Czerwień ↔ Złoty / Żółty ▶`),
 zakładką **Detal i Ostrość** (4 tryby wyostrzania: Portret z ochroną skóry, Dekonwolucja RL obiektywu, Krawędzie Clamped USM, Miękki blask + Struktura i Odszumianie OKLab),
 biofizyczną optyką skóry (**Melanina/Hemoglobina**, **Redukcja połysku SUV De-Shine**, **Niedoskonałości Auto-Heal**, **Oczy i zęby**),
-**Wektorskopem Linii Skóry OKLCh (52°)**, **Plastyką 3D**, subtelnym **dodge & burn** oraz oknem **Eksportuj jako… (TIFF/PNG 16-bit, WebP, JPG 4:4:4, ProPhoto RGB, Display P3, Adobe RGB, sRGB)**. Autor: Jack4B.
+**Wektorskopem Linii Skóry OKLCh (52°)** oraz oknem **Eksportuj jako… (TIFF/PNG 16-bit, WebP, JPG 4:4:4, ProPhoto RGB, Display P3, Adobe RGB, sRGB)**. Autor: Jack4B.
 
 ## Kontrola jakości
 
 `tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--colorchecker` sprawdza detekcję i kalibrację 24 pól ColorChecker (średnie ΔE₀₀ < 1,2, skóra < 1,0, szarości < 0,8).
+
+### 0.7.0
+- **Układ interfejsu w stylu Adobe Lightroom / Capture One Pro (`Prawy Dok Inspektora`)** (`retusz/gui/app.py`):
+  - **Odchudzony pasek górny (3 czytelne sekcje)**: *Pliki* (`Otwórz zdjęcie`, `Otwórz folder`, `Ustawienia`), *Moduły i Widok* (`Biblioteka (G)`, `Porównaj`, `Grading z AI`, `Wynik | Przed | Po | Podział | Z wzorcem`, `Dopasuj | 100% | Przed/Po`) oraz *Eksport* (`Zapisz`, `Eksportuj jako…`, `Eksportuj serię`);
+  - **Pełna wysokość pionowa dla portretów**: przeniesienie wszystkich suwaków, histogramu, wektorskopu skóry i narzędzi lokalnych (`Pędzel D&B`, `Kadr`) z dolnego paska do **Prawego Doku Inspektora** zwiększa pionową wysokość roboczą zdjęcia o ~40%;
+  - **Kolorowe podpowiedzi kierunkowe pod każdym suwakiem (`SLIDER_HINTS`) oraz panel `💡 Podpowiedź PRO` (`PRO_TIPS`)**: czytelne podpisy skrajnych kierunków w kolorach działania (np. `Odcień skóry: ◀ Róż / Czerwień ─── Złoty / Żółty ▶`, `Temperatura: ◀ Chłodny (Niebieski) ─── Ciepły (Bursztyn) ▶`, `Odcień: ◀ Zieleń ─── Magenta (Róż) ▶`).
+- **Dwuosiowe Światło 3D (`Lewo ↔ Prawo` oraz `Dół ↔ Góra`) i Separacja tła 3D (`bg_exposure`)** (`retusz/engine/relight.py`, `retusz/engine/pipeline.py`):
+  - **`Światło 3D: Lewo ↔ Prawo` (`light_x`)** oraz **`Światło 3D: Dół ↔ Góra` (`light_y`)**: fizyczne pozycjonowanie wirtualnego softboxa 3D na półsferze $(L_x, L_y, L_z)$ względem mapy normalnych powierzchni twarzy (z zachowaniem przełącznika `Auto 3D` i średniej ekspozycji postaci);
+  - **`Separacja tła 3D` (`bg_exposure`, `◀ Przyciemnij tło ↔ Rozjaśnij tło ▶`)**: selektywna zmiana ekspozycji tła w świetle liniowym ($\pm 0{,}75\text{ EV}$) na podstawie wygładzonej filtrem prowadzącym maski głębi 3D i maski skóry (twarz pozostaje w 100% chroniona, 0% halo).
+- **Wizualna diagnostyka pracy AI (`Maska AI (M)`) oraz import wybranych zdjęć z folderu** (`retusz/engine/histo.py`, `retusz/sidecar.py`, `retusz/gui/library.py`):
+  - **Przełącznik `Maska AI (M)`** pod histogramem i wektorskopem wyświetla na żywo bursztynową maskę roboczą skóry, turkusowy obrys separacji sylwetki 3D, ramki wykrytych twarzy (`AI Twarz #1`) oraz 5 punktów anatomicznych YuNet (oczy w kolorze szmaragdowym, czubek nosa w bursztynowym, kąciki ust w różowym);
+  - **Import wybranych zdjęć z folderu (`Series.from_selection`, `Otwórz zdjęcie` z wyborem wielokrotnym `Ctrl/Shift` oraz `+ Dodaj zdjęcia…` w Bibliotece)**: pozwala otworzyć lub dołączyć do serii tylko wybrane zdjęcia z dużego folderu.
 
 ### 0.6.0
 - **Moduły `Biblioteka (G)` i `Edycja (D)` w stylu Lightroom / Capture One** (`retusz/gui/library.py`, `retusz/gui/app.py`):

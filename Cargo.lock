@@ -2497,7 +2497,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "retusz-app"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "clap",
  "eframe",
@@ -2513,7 +2513,7 @@ dependencies = [
 
 [[package]]
 name = "retusz-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "rayon",
  "serde",
@@ -2522,7 +2522,7 @@ dependencies = [
 
 [[package]]
 name = "retusz-gpu"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "bytemuck",
  "pollster",

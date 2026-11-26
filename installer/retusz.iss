@@ -2,7 +2,7 @@
 ; Author: Jack4B
 
 #define MyAppName "Retusz"
-#define MyAppVersion "0.6.0"
+#define MyAppVersion "0.7.0"
 #define MyAppPublisher "Jack4B"
 #define MyAppURL "https://github.com/Jack4B/retusz"
 #define MyAppExeName "Retusz.exe"

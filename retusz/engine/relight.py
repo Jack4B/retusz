@@ -168,6 +168,26 @@ def light_vec(angle_deg, elev_deg=45.0):
     a, e = np.radians(angle_deg), np.radians(elev_deg)
     return np.array([np.cos(a)*np.cos(e), -np.sin(a)*np.cos(e), np.sin(e)], np.float32)
 
+def light_vec_xy(light_x: float, light_y: float) -> np.ndarray:
+    """Two-axis 3D hemisphere light vector from horizontal light_x (-1 left .. +1 right)
+    and vertical light_y (-1 bottom .. +1 top). Image coords have y pointing downward."""
+    lx = float(np.clip(light_x, -1.0, 1.0)) * 0.85
+    ly = -float(np.clip(light_y, -1.0, 1.0)) * 0.85
+    r2 = lx * lx + ly * ly
+    if r2 > 0.82:
+        sc = np.sqrt(0.82 / r2)
+        lx *= sc; ly *= sc
+    lz = float(np.sqrt(max(0.18, 1.0 - (lx * lx + ly * ly))))
+    v = np.array([lx, ly, lz], np.float32)
+    return (v / (np.linalg.norm(v) + 1e-8)).astype(np.float32)
+
+def angle_to_xy(angle_deg: float | None) -> tuple[float, float]:
+    """Convert compass angle in degrees (at 45 deg elevation) to (light_x, light_y) in [-1, 1]."""
+    if angle_deg is None:
+        return (0.0, 0.0)
+    v = light_vec(angle_deg)
+    return (float(np.clip(v[0] / 0.85, -1.0, 1.0)), float(np.clip(-v[1] / 0.85, -1.0, 1.0)))
+
 def estimate_light(rgb, n, fg):
     """Least squares L ≈ c0 + c·n on subject pixels; returns angle in degrees or None."""
     L = cv2.cvtColor(cv2.resize(rgb, (n.shape[1], n.shape[0]), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2LAB)[..., 0].astype(np.float32)
@@ -201,15 +221,8 @@ class Relight:
         self.n, self.curv = normals(self.depth, self.fg)
         self.auto_angle = estimate_light(rgb, self.n, self.fg)
 
-    def gain(self, qh, qw, Lq, amount, angle=None, rgb_q=None):
-        """Multiplicative gain (relative) at qh x qw. Lq = rendered L (0..100) at the same size;
-        rgb_q = optional rendered uint8 RGB at the same size for 3-channel colour edge snapping."""
-        if amount <= 0: return np.zeros((qh, qw), np.float32)
-        ang = angle if angle is not None else (self.auto_angle if self.auto_angle is not None else 120.0)
-        l = light_vec(ang)
+    def _refined_fg(self, qh, qw, Lq, rgb_q=None):
         rs = lambda a: cv2.resize(a, (qw, qh), interpolation=cv2.INTER_LINEAR)
-        n = rs(self.n); curv = rs(self.curv)
-        # subject mask snapped to the image's own edges (RGB when available, else luminance)
         if rgb_q is not None:
             I = rgb_q.astype(np.float32)/255.0
             fg = np.clip(guided_refine_rgb(I, (rs(self.fg) > 0.5).astype(np.float32), max(2, max(qw, qh)//60), 1e-3), 0, 1)
@@ -218,6 +231,20 @@ class Relight:
             I = Lq.astype(np.float32)/100
             fg = np.clip(guided_refine(I, (rs(self.fg) > 0.5).astype(np.float32), max(2, max(qw, qh)//60), 1e-3), 0, 1)
             fg = np.clip(guided_refine(I, (fg > 0.5).astype(np.float32), max(1, max(qw, qh)//300), 1e-3), 0, 1)
+        return fg
+
+    def gain(self, qh, qw, Lq, amount, angle=None, rgb_q=None, light_x=None, light_y=None):
+        """Multiplicative gain (relative) at qh x qw. Lq = rendered L (0..100) at the same size;
+        rgb_q = optional rendered uint8 RGB at the same size for 3-channel colour edge snapping."""
+        if amount <= 0: return np.zeros((qh, qw), np.float32)
+        if (light_x is not None and abs(light_x) > 1e-4) or (light_y is not None and abs(light_y) > 1e-4):
+            l = light_vec_xy(light_x or 0.0, light_y or 0.0)
+        else:
+            ang = angle if angle is not None else (self.auto_angle if self.auto_angle is not None else 120.0)
+            l = light_vec(ang)
+        rs = lambda a: cv2.resize(a, (qw, qh), interpolation=cv2.INTER_LINEAR)
+        n = rs(self.n); curv = rs(self.curv)
+        fg = self._refined_fg(qh, qw, Lq, rgb_q=rgb_q)
         shade = np.clip(n@l - l[2], -0.8, 0.5)                      # flat, camera-facing = 0
         sb = max(qw, qh)/300                                         # spread inside the subject only
         shade = cv2.GaussianBlur(shade*fg, (0, 0), sb)/(cv2.GaussianBlur(fg, (0, 0), sb) + 1e-4)
@@ -239,3 +266,19 @@ class Relight:
         g = fg*(0.38*shade + 0.06*curv + 0.15*clarity)              # subject sculpt only, background untouched
         g = np.where(g > 0, g*np.clip((97-Lq)/25, 0, 1), g)          # no blown highlights
         return (amount*g).astype(np.float32)
+
+    def bg_gain(self, qh, qw, Lq, bg_exposure: float, skin_mask=None, rgb_q=None) -> np.ndarray:
+        """3D Background Separation: adjusts background exposure (-1..+1 -> +-0.75 EV) using the
+        guided-filtered 3D subject matte + skin mask so the subject and face remain 100% untouched."""
+        if abs(bg_exposure) <= 1e-4:
+            return np.zeros((qh, qw), np.float32)
+        fg = self._refined_fg(qh, qw, Lq, rgb_q=rgb_q)
+        if skin_mask is not None:
+            sk = skin_mask if skin_mask.shape[:2] == (qh, qw) else cv2.resize(skin_mask, (qw, qh), interpolation=cv2.INTER_LINEAR)
+            fg = np.maximum(fg, sk)
+        # Feather outward slightly from the subject core so no halo appears around hair/shoulders
+        bg = np.clip(1.0 - np.clip(fg * 1.15, 0.0, 1.0), 0.0, 1.0) ** 1.35
+        ev = float(np.clip(bg_exposure, -1.0, 1.0)) * 0.75
+        g = bg * (float(2.0 ** ev) - 1.0)
+        g = np.where(g > 0, g * np.clip((97.0 - Lq) / 22.0, 0.0, 1.0), g)
+        return g.astype(np.float32)

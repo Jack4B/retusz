@@ -80,7 +80,9 @@ class ImageView(tk.Canvas):
     def zoom_at(self, factor, x, y):
         if self.rgb is None: return
         cw, ch = self.winfo_width(), self.winfo_height(); W, H = self.size_wh()
-        u, v = self.to_norm(x, y); z = float(np.clip(self.cur_zoom()*factor, ZMIN, ZMAX))
+        u, v = self.to_norm(x, y)
+        base_z = max(self.cur_zoom(), ZMIN) if factor > 1 else self.cur_zoom()
+        z = float(np.clip(base_z*factor, ZMIN, ZMAX))
         if z <= self.fit_zoom()*1.001 and factor < 1: self.set_view(None, (0.5, 0.5), True); return
         self.set_view(z, (u + (cw/2-x)/(W*z), v + (ch/2-y)/(H*z)), True)
 
@@ -99,11 +101,11 @@ class ImageView(tk.Canvas):
         W, H = self.size_wh(); z = self.cur_zoom(); dw, dh = W*z, H*z
         cx, cy = (0.5, 0.5) if self.zoom is None else self.center
         x0, y0 = cw/2 - cx*dw, ch/2 - cy*dh
-        if self.zoom is not None:   # keep the image on screen
-            if dw <= cw: x0 = (cw-dw)/2
-            else: x0 = min(0, max(cw-dw, x0))
-            if dh <= ch: y0 = (ch-dh)/2
-            else: y0 = min(0, max(ch-dh, y0))
+        if self.zoom is not None:   # keep the image on screen without jumping the cursor anchor
+            zf = self.fit_zoom()
+            x0_fit, y0_fit = max(0.0, (cw - W*zf)/2), max(0.0, (ch - H*zf)/2)
+            x0 = float(np.clip(x0, min(cw - dw, cw - x0_fit - dw), max(0.0, x0_fit)))
+            y0 = float(np.clip(y0, min(ch - dh, ch - y0_fit - dh), max(0.0, y0_fit)))
             self.center = [(cw/2-x0)/dw, (ch/2-y0)/dh]
         self.geom = (x0, y0, dw, dh)
         u0, u1 = max(0.0, -x0/dw), min(1.0, (cw-x0)/dw); v0, v1 = max(0.0, -y0/dh), min(1.0, (ch-y0)/dh)

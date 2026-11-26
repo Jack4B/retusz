@@ -53,6 +53,25 @@ class Series:
             self.params = Params.from_dict(d.get("params"))
             _per_photo_only(self.params)
 
+    @classmethod
+    def from_selection(cls, paths: list[Path] | tuple[Path, ...]) -> tuple["Series", list[Path]]:
+        """Create/load a Series for a user-selected subset of photo files from a folder."""
+        cleaned = [Path(p) for p in paths if p and Path(p).is_file()]
+        if not cleaned:
+            raise ValueError("Brak wybranych plików zdjęć.")
+        folder = cleaned[0].parent
+        ser = cls(folder)
+        ref_res = ser.reference.resolve() if (ser.reference and ser.reference.exists()) else None
+        seen = set()
+        selected: list[Path] = []
+        for p in cleaned:
+            rp = p.resolve()
+            if rp == ref_res or rp in seen:
+                continue
+            seen.add(rp)
+            selected.append(p)
+        return ser, selected
+
     def _rel_or_abs(self, path: Path) -> str:
         try:
             return str(Path(path).resolve().relative_to(self.folder.resolve()))
@@ -129,3 +148,87 @@ class Series:
                 p = self.params_for(ph)
                 for k, v in values.items(): setattr(p, k, v)
                 self.set_override(ph, Params.from_dict(p.to_dict()))
+
+    @staticmethod
+    def _oklab_signature(path: Path):
+        from . import imageio
+        from .engine import tone as TN
+        import numpy as np
+        try:
+            rgb = imageio.load_preview(Path(path), 160).astype(np.float32) / 255.0
+        except Exception:
+            return None
+        ok = TN.lin_to_oklab(TN.srgb_to_lin(rgb))
+        L, a, b = ok[..., 0], ok[..., 1] * 3.2, ok[..., 2] * 3.2
+        h, w = L.shape
+        cy0, cy1 = h // 4, max(h // 4 + 1, 3 * h // 4)
+        cx0, cx1 = w // 4, max(w // 4 + 1, 3 * w // 4)
+        return np.array([
+            float(L.mean()), float(L.std()),
+            float(np.percentile(L, 15)), float(np.percentile(L, 50)), float(np.percentile(L, 85)),
+            float(a.mean()), float(a.std()), float(b.mean()), float(b.std()),
+            float(L[cy0:cy1, cx0:cx1].mean()), float(a[cy0:cy1, cx0:cx1].mean()), float(b[cy0:cy1, cx0:cx1].mean()),
+        ], np.float32)
+
+    def auto_match_references(self, photos: list[Path]) -> dict[Path, Path]:
+        """Automatically pair each photo in `photos` with the closest matching reference image
+        from `self.reference_bank` using perceptual OKLab luminance & chromaticity signatures."""
+        import numpy as np
+        candidates = [Path(r) for r in self.reference_bank if Path(r).exists()]
+        if not candidates and self.reference and self.reference.exists():
+            candidates = [self.reference]
+        ref_sigs: list[tuple[Path, np.ndarray]] = []
+        for r in candidates:
+            sig = self._oklab_signature(r)
+            if sig is not None:
+                ref_sigs.append((r, sig))
+        if not ref_sigs:
+            return {}
+        mapping: dict[Path, Path] = {}
+        for ph in photos:
+            ph_p = Path(ph)
+            psig = self._oklab_signature(ph_p)
+            if psig is None:
+                continue
+            best_r = min(ref_sigs, key=lambda item: float(np.linalg.norm(psig - item[1])))[0]
+            p = self.params_for(ph_p)
+            p.reference_path = str(best_r)
+            p.ref_colorchecker = False
+            self.set_override(ph_p, p)
+            mapping[ph_p] = best_r
+        self.save()
+        return mapping
+
+    @classmethod
+    def discover_workspace_folders(cls, folder: Path, output_subfolder: str = "retusz") -> list[tuple[Path, int]]:
+        """Discover current folder, its immediate subfolders, and sibling folders that contain photos
+        (excluding the export output subfolder), returning [(folder_path, image_count), ...]."""
+        from . import imageio
+        cur = Path(folder).resolve()
+        out_name = (output_subfolder or "retusz").lower()
+        cand_dirs: list[Path] = [cur]
+        try:
+            for d in sorted(cur.iterdir()):
+                if d.is_dir() and not d.name.startswith(".") and d.name.lower() != out_name:
+                    cand_dirs.append(d.resolve())
+        except OSError:
+            pass
+        if cur.parent and cur.parent != cur:
+            try:
+                for d in sorted(cur.parent.iterdir()):
+                    if d.is_dir() and not d.name.startswith(".") and d.name.lower() != out_name:
+                        dr = d.resolve()
+                        if dr not in cand_dirs:
+                            cand_dirs.append(dr)
+            except OSError:
+                pass
+        result: list[tuple[Path, int]] = []
+        for d in cand_dirs:
+            try:
+                imgs = [p for p in imageio.list_images(d) if p.parent.resolve() == d]
+            except Exception:
+                imgs = []
+            if imgs or d == cur:
+                result.append((d, len(imgs)))
+        return result
+
