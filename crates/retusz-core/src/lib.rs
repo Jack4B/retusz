@@ -12,12 +12,34 @@ pub mod histo;
 pub mod params;
 pub mod pipeline;
 pub mod relight;
+pub mod skin_physics;
 pub mod tone;
 pub mod wb;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_biophysical_skin_chromophores_deshine_and_llf() {
+        let base_skin = [205.0 / 255.0, 158.0 / 255.0, 134.0 / 255.0];
+        let red_blotch = [205.0 / 255.0, 135.0 / 255.0, 118.0 / 255.0];
+        let (_, hem_base) = skin_physics::decompose_chromophores(base_skin);
+        let (_, hem_red) = skin_physics::decompose_chromophores(red_blotch);
+        assert!(hem_red > hem_base + 0.04, "expected higher hemoglobin in red blotch");
+
+        let shiny = [245.0, 198.0, 174.0];
+        let matte = [205.0, 158.0, 134.0];
+        let deshined = skin_physics::deshine_pixel_rgb(shiny, matte, 0.85);
+        assert!(deshined[0] < shiny[0] - 20.0);
+        assert!((deshined[0] - deshined[2] - (matte[0] - matte[2])).abs() < 8.0);
+
+        // Fast LLF amplifies small details (|L - gamma| = 4) and leaves step edges (|L - gamma| = 60) intact
+        let fine = skin_physics::fast_llf_remap(54.0, 50.0, 0.8, 11.0);
+        let step = skin_physics::fast_llf_remap(80.0, 15.0, 0.8, 11.0);
+        assert!(fine > 56.5);
+        assert!((step - 80.0).abs() < 1e-3);
+    }
 
     #[test]
     fn test_ciede2000_sharma_reference_pair() {

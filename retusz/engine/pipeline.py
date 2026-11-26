@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field, asdict, fields
 import numpy as np, cv2
 from . import color as C, faces as F, render as R, modflows as MF, relight as RL, dnb as DNB
-from . import wb as WB, geometry as GEO, tone as TN, colorchecker as CC
+from . import wb as WB, geometry as GEO, tone as TN, colorchecker as CC, skin_physics as SP
 
 GRID = 33
 ANALYSIS_SIDE = 1200   # masks, zones, vignette, skin statistics
@@ -18,7 +18,7 @@ FIT_SIDE = 800         # AI encoder / IDT input
 
 @dataclass
 class Params:
-    """User controls. Ranges: strength/skin/vignette/db/plastic/skin_even/skin_cast/wide 0..1,
+    """User controls. Ranges: strength/skin/vignette/db/plastic/skin_even/skin_cast/deshine/blemish/eyes_teeth/wide 0..1,
     exposure -2..2 EV, contrast/shadows/highlights/whites/blacks/saturation/vibrance/clarity/skin_hue/temp/tint -1..1."""
     strength: float = 1.0
     skin: float = 1.0
@@ -31,13 +31,16 @@ class Params:
     vignette: float = 0.3
     db: float = 0.4
     plastic: float = 0.3            # 'Plastyka 3D'
-    clarity: float = 0.0            # 'Przejrzystość' -1..1 (guided local mid-tone contrast, spares skin)
+    clarity: float = 0.0            # 'Przejrzystość' -1..1 (Fast LLF local mid-tone contrast, spares skin)
     light_angle: float | None = None  # 'Kierunek światła' in degrees, None = auto (from the reference)
     saturation: float = 0.0         # 'Nasycenie' -1..1
     vibrance: float = 0.0           # 'Jaskrawość' -1..1 (OKLab, boosts dull colours, spares skin)
-    skin_even: float = 0.3          # 'Równanie skóry' 0..1 (local colour casts on skin, mixed light)
+    skin_even: float = 0.3          # 'Równanie skóry' 0..1 (chromophore hemoglobin/melanin + mixed-light evening)
     skin_cast: float = 0.0          # 'Czysta skóra' 0..1 (OKLCh skin-locus cast reduction)
     skin_hue: float = 0.0           # 'Odcień skóry' -1..1 (OKLCh skin hue angle rotation)
+    deshine: float = 0.0            # 'Redukcja połysku' 0..1 (Dichromatic SUV skin specular removal)
+    blemish: float = 0.0            # 'Niedoskonałości' 0..1 (Two-band pore-preserving blemish auto-heal)
+    eyes_teeth: float = 0.0         # 'Oczy i zęby' 0..1 (Anatomical iris/sclera/teeth enhancement)
     wide: float = 0.0               # 'Pełne barwy' 0..1: colours as sRGB numbers look on a wide-gamut (AdobeRGB) monitor
     temp: float = 0.0               # 'Temperatura' -1..1 (white balance, Bradford CAT)
     tint: float = 0.0               # 'Odcień' -1..1 (+ = magenta)
@@ -55,7 +58,7 @@ class Params:
         p = cls(**{k: v for k, v in (d or {}).items() if k in names})
         if p.light_angle is not None: p.light_angle = float(p.light_angle) % 360
         p.exposure = float(np.clip(p.exposure, -2.0, 2.0))
-        for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even", "skin_cast", "wide"):
+        for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even", "skin_cast", "deshine", "blemish", "eyes_teeth", "wide"):
             setattr(p, k, float(np.clip(getattr(p, k), 0, 1)))
         for k in ("contrast", "shadows", "highlights", "whites", "blacks", "clarity", "saturation", "vibrance", "skin_hue", "temp", "tint"):
             setattr(p, k, float(np.clip(getattr(p, k), -1, 1)))
@@ -427,11 +430,14 @@ class Engine:
         need_vig = p.vignette > 0 and np.any(fit.vig_diff < 0)
         need_3d = p.plastic > 0 and fit.relight is not None
         need_even = p.skin_even > 0 and fit.faces_n and mq_raw.max() > 0.3
+        need_deshine = p.deshine > 0 and mq_raw.max() > 0.25
         need_clarity = abs(p.clarity) > 1e-4
-        if need_vig or need_3d or need_even or need_clarity:
+        if need_vig or need_3d or need_even or need_deshine or need_clarity:
             base_q = R.render(q, lut_bg, lut_sk, mq, gain); lab_q = C.to_lab(base_q); Lq = lab_q[..., 0]
         if need_even:
             gain += skin_even_gain(base_q, lab_q, mq_raw, [f*qw for f in fit.faces_n], p.skin_even)
+        if need_deshine:
+            gain += SP.deshine_gain(base_q, mq_raw, p.deshine)
         if need_3d:
             gain += fit.relight.gain(qh, qw, Lq, p.plastic, p.light_angle, rgb_q=base_q)[..., None]
         if need_clarity:
@@ -448,6 +454,11 @@ class Engine:
         if db_enabled and p.db > 0 and fit.faces_n:
             lms = getattr(fit, "lms_n", None)
             out = _dodge_burn_region(out, mq_raw, [f*W for f in fit.faces_n], p.db, [l*W for l in lms] if lms else None)
+        if db_enabled and (p.blemish > 0 or p.eyes_teeth > 0) and fit.faces_n:
+            lms = getattr(fit, "lms_n", None)
+            out = SP.apply_portrait_details(out, mq_raw, [f*W for f in fit.faces_n],
+                                            [l*W for l in lms] if lms else None,
+                                            blemish=p.blemish, eyes_teeth=p.eyes_teeth)
         T["dodge_burn_s"] = time.perf_counter()-t
         return (out, mq_raw) if return_mask else out
 
