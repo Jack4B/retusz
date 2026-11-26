@@ -9,12 +9,18 @@ import numpy as np
 from PIL import Image, ImageCms
 from .paths import resource_dir
 
-OUTPUT_PROFILES = {"keep": "Jak oryginał", "srgb": "sRGB", "adobergb": "Adobe RGB (1998)", "p3": "Display P3"}
-_FILES = {"srgb": "sRGB.icc", "adobergb": "AdobeRGB1998-compat.icc", "p3": "DisplayP3.icc"}
+OUTPUT_PROFILES = {
+    "keep": "Jak oryginał",
+    "srgb": "sRGB",
+    "p3": "Display P3",
+    "adobergb": "Adobe RGB (1998)",
+    "prophoto": "ProPhoto RGB (ROMM)",
+}
+_FILES = {"srgb": "sRGB.icc", "adobergb": "AdobeRGB1998-compat.icc", "p3": "DisplayP3.icc", "prophoto": "AdobeRGB1998-compat.icc"}
 _lock = threading.Lock(); _xf = {}; _monitor = None
 
 def icc_bytes(name: str) -> bytes:
-    return (resource_dir() / "icc" / _FILES[name]).read_bytes()
+    return (resource_dir() / "icc" / _FILES.get(name, "sRGB.icc")).read_bytes()
 
 def key(icc: bytes | None) -> str:
     """Identity of a profile; missing profile = sRGB (the JPEG/web default)."""

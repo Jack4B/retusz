@@ -9,19 +9,20 @@ from PIL import Image
 from . import theme as T
 from .imageview import ImageView
 from .compare import CompareView
+from .library import LibraryView
 from .histview import HistView
-from .dialogs import SettingsDialog, ModelDialog, ProgressDialog
+from .dialogs import SettingsDialog, ModelDialog, ProgressDialog, ExportAsDialog
 from .. import imageio, models, batch, export, colorman as CM, presets as PR, __version__
 from ..reference import Reference
 from ..settings import Settings
 from ..sidecar import Series
 from ..engine.pipeline import Engine, Params
 from ..engine import render as R, color as C, device as DEV, modflows as MF, relight as RL
-from ..engine import histo as HI, wb as WB, geometry as G, colorchecker as CC
+from ..engine import histo as HI, wb as WB, geometry as G, colorchecker as CC, detail as DET
 
 ENGINE_LABEL = {"ai": "AI (B6)", "ai_light": "AI lekki (B0)", "classic": "bez AI (IDT)"}
 CANVAS_MODES = ["Wynik", "Przed | Po", "Podział", "Z wzorcem"]
-SLIDER_TABS = ["Światło i Kolor", "Portret i Plastyka", "▸ Wzorzec (AI)"]
+SLIDER_TABS = ["Światło i Kolor", "Portret i 3D", "Detal i Ostrość", "Wzorzec (AI)"]
 SLIDER_GROUPS = {
     SLIDER_TABS[0]: [  # (key, label, lo, hi, kind, row, col)
         ("exposure", "Ekspozycja", -200, 200, "ev", 0, 0),
@@ -48,22 +49,32 @@ SLIDER_GROUPS = {
         ("vignette", "Winieta", 0, 100, "pct", 2, 3),
     ],
     SLIDER_TABS[2]: [
+        ("sharpen_amount", "Ostrość", 0, 100, "pct", 0, 0),
+        ("texture", "Struktura", -100, 100, "num", 0, 1),
+        ("denoise", "Odszumianie", 0, 100, "pct", 0, 2),
+        ("brightness", "Jasność (Półtony)", -100, 100, "num", 1, 0),
+        ("dehaze", "Zamglenie (Dehaze)", -100, 100, "num", 1, 1),
+        ("wide", "Pełne barwy", 0, 100, "pct", 1, 2),
+    ],
+    SLIDER_TABS[3]: [
         ("strength", "Siła kolorów", 0, 100, "pct", 0, 0),
         ("skin", "Ochrona skóry", 0, 100, "pct", 0, 1),
-        ("wide", "Pełne barwy", 0, 100, "pct", 1, 0),
     ],
 }
 _TAB_ALIASES = {
     "Wzorzec i Portret": SLIDER_TABS[1],
     "Portret i Plastyka": SLIDER_TABS[1],
+    "Portret i 3D": SLIDER_TABS[1],
     "Światło i Kolor": SLIDER_TABS[0],
-    "Wzorzec (AI)": SLIDER_TABS[2],
-    "▸ Wzorzec (AI)": SLIDER_TABS[2],
+    "Detal i Ostrość": SLIDER_TABS[2],
+    "Wzorzec (AI)": SLIDER_TABS[3],
+    "▸ Wzorzec (AI)": SLIDER_TABS[3],
 }
 _DEFAULTS = Params()
 _COPY_KEYS = (
-    "strength", "skin", "exposure", "contrast", "shadows", "highlights", "whites", "blacks",
-    "vignette", "db", "plastic", "clarity", "light_angle", "saturation", "vibrance",
+    "strength", "skin", "exposure", "contrast", "brightness", "dehaze", "shadows", "highlights", "whites", "blacks",
+    "vignette", "db", "plastic", "clarity", "texture", "sharpen_amount", "sharpen_mode", "denoise",
+    "light_angle", "saturation", "vibrance",
     "skin_even", "skin_cast", "skin_hue", "deshine", "blemish", "eyes_teeth", "wide", "temp", "tint",
 )
 SLIDER_AREA_H = 166
@@ -114,7 +125,9 @@ class RetuszApp(ctk.CTk):
         self.bind("<KeyPress-space>", lambda e: self._space_key(True)); self.bind("<KeyRelease-space>", lambda e: self._space_key(False))
         self.bind("<bracketleft>", lambda e: self._brush_step(-1)); self.bind("<bracketright>", lambda e: self._brush_step(1))
         self.bind("<Control-0>", lambda e: self.zoom_fit()); self.bind("<Control-1>", lambda e: self.zoom_100())
-        for k, fn in (("w", self.toggle_pick), ("c", self.toggle_crop_tool), ("j", self.toggle_clip), ("m", self.toggle_mask)):
+        self.bind("<Control-Shift-E>", lambda e: self.open_export_as()); self.bind("<Control-Shift-e>", lambda e: self.open_export_as())
+        for k, fn in (("w", self.toggle_pick), ("c", self.toggle_crop_tool), ("j", self.toggle_clip), ("m", self.toggle_mask),
+                      ("g", self.toggle_library), ("d", self.hide_library)):
             self.bind(f"<KeyPress-{k}>", lambda e, fn=fn: self._key(fn)); self.bind(f"<KeyPress-{k.upper()}>", lambda e, fn=fn: self._key(fn))
         self.bind("<Return>", lambda e: self._key(self._crop_done)); self.bind("<Escape>", lambda e: self._key(self._escape))
         self.submit(lambda: (R.warmup(), None)[1], None)
@@ -125,29 +138,38 @@ class RetuszApp(ctk.CTk):
     # ================= layout =================
     def _build(self):
         top = ctk.CTkFrame(self, fg_color=T.BG); top.pack(fill="x", padx=14, pady=(12, 8))
-        T.button(top, "Otwórz zdjęcie", self.open_photo, width=124).pack(side="left")
-        T.button(top, "Otwórz folder", self.open_folder, width=120).pack(side="left", padx=6)
-        T.button(top, "Porównaj", self.show_compare, width=88).pack(side="left", padx=(0, 6))
-        T.button(top, "Grading z AI", self.open_transfer, width=112).pack(side="left", padx=(0, 6))
-        T.button(top, "Ustawienia", self.open_settings, width=94).pack(side="left")
+        def tbtn(parent, text, cmd, w, accent=False, side="left", padx=0):
+            b = T.button(parent, text, cmd, accent=accent, width=w)
+            b.configure(font=T.font(12, "bold" if accent else "normal"), height=32)
+            b.pack(side=side, padx=padx)
+            return b
+        tbtn(top, "Biblioteka (G)", self.show_library, 92, padx=(0, 4))
+        tbtn(top, "Otwórz zdjęcie", self.open_photo, 96)
+        tbtn(top, "Otwórz folder", self.open_folder, 90, padx=4)
+        tbtn(top, "Porównaj", self.show_compare, 68, padx=(0, 4))
+        tbtn(top, "Grading z AI", self.open_transfer, 86, padx=(0, 4))
+        tbtn(top, "Ustawienia", self.open_settings, 76)
 
-        vb = ctk.CTkFrame(top, fg_color=T.BG); vb.pack(side="left", padx=(14, 0))
+        tbtn(top, "Eksportuj serię", self.export_series, 108, accent=True, side="right")
+        tbtn(top, "Eksportuj jako…", self.open_export_as, 112, accent=True, side="right", padx=4)
+        tbtn(top, "Zapisz", self.save_current, 58, accent=True, side="right")
+
+        vb = ctk.CTkFrame(top, fg_color=T.BG); vb.pack(side="left", padx=(6, 0))
         self.canvas_mode = T.segmented(vb, CANVAS_MODES, command=self._set_canvas_mode)
+        self.canvas_mode.configure(font=T.font(12))
         self.canvas_mode.set("Przed | Po" if not self.ref_enabled else "Z wzorcem")
         self.canvas_mode.pack(side="left")
 
-        zb = ctk.CTkFrame(top, fg_color=T.BG); zb.pack(side="left", padx=(12, 0))
-        T.button(zb, "Dopasuj", self.zoom_fit, width=70).pack(side="left")
-        T.button(zb, "100%", self.zoom_100, width=52).pack(side="left", padx=5)
-        self.before_btn = T.button(zb, "Przed/Po", self.toggle_before, width=80)
-        self.before_btn.pack(side="left", padx=(0, 5))
-        zbox = ctk.CTkFrame(zb, fg_color=T.BG, width=52, height=30); zbox.pack(side="left"); zbox.pack_propagate(False)
+        zb = ctk.CTkFrame(top, fg_color=T.BG); zb.pack(side="left", padx=(6, 0))
+        tbtn(zb, "Dopasuj", self.zoom_fit, 56)
+        tbtn(zb, "100%", self.zoom_100, 42, padx=3)
+        self.before_btn = tbtn(zb, "Przed/Po", self.toggle_before, 64, padx=(0, 3))
+        zbox = ctk.CTkFrame(zb, fg_color=T.BG, width=38, height=30); zbox.pack(side="left"); zbox.pack_propagate(False)
         self.zoom_lbl = T.label(zbox, "", 12, T.MUTED, anchor="w"); self.zoom_lbl.pack(fill="both", expand=True)
-        T.button(top, "Eksportuj serię", self.export_series, accent=True, width=132).pack(side="right")
-        T.button(top, "Zapisz", self.save_current, accent=True, width=86).pack(side="right", padx=8)
 
         self.main = ctk.CTkFrame(self, fg_color=T.BG); self.main.pack(fill="both", expand=True)
         self.compare = CompareView(self, self.hide_compare, self.save_current, self._compare_full)
+        self.library = LibraryView(self, self)
 
         side = ctk.CTkFrame(self.main, fg_color=T.BG, width=170); side.pack(side="left", fill="y", padx=(14, 0))
         self.series_lbl = T.label(side, "Seria", 13, weight="bold"); self.series_lbl.pack(anchor="w", pady=(0, 6))
@@ -162,7 +184,7 @@ class RetuszApp(ctk.CTk):
         self.ref_hdr = T.label(self.imgs, "Wzorzec (opcjonalny)", 14)
         self.view_src = ImageView(self.imgs, "Otwórz zdjęcie lub folder")
         self.view_res = ImageView(self.imgs, "Otwórz zdjęcie lub folder — pełny edytor OKLab / Plastyka 3D / D&B v2.\nDopasowanie do wzorca i Presety są dostępne poniżej.")
-        self.view_ref = ImageView(self.imgs, "Opcjonalny wzorzec (AI Color Match)\nWybierz wzorzec w zakładce „▸ Wzorzec (AI)”")
+        self.view_ref = ImageView(self.imgs, "Opcjonalny wzorzec (AI Color Match)\nWybierz wzorzec w zakładce „Wzorzec (AI)”")
         self._apply_canvas_layout()
 
         self.view_res.bind("<ButtonPress-1>", self._brush_press); self.view_res.bind("<B1-Motion>", self._brush_move)
@@ -182,18 +204,19 @@ class RetuszApp(ctk.CTk):
         ctl.pack(fill="x", pady=(12, 0))
         sl = ctk.CTkFrame(ctl, fg_color=T.CARD)
         hdr = ctk.CTkFrame(sl, fg_color=T.CARD); hdr.pack(fill="x", padx=6, pady=(0, 6))
-        self.slider_tabs = T.segmented(hdr, SLIDER_TABS, command=self._slider_tab)
-        self.slider_tabs.set(SLIDER_TABS[0]); self.slider_tabs.pack(side="left")
-
         act = ctk.CTkFrame(hdr, fg_color=T.CARD); act.pack(side="right")
         def sbtn(text, cmd, w):
-            b = T.button(act, text, cmd, width=w); b.configure(height=28, font=T.font(11)); b.pack(side="left", padx=(3, 0)); return b
-        self.undo_btn = sbtn("Cofnij", self.undo, 46)
-        self.redo_btn = sbtn("Ponów", self.redo, 46)
-        sbtn("Kopiuj", self.copy_params, 46)
-        self.paste_btn = sbtn("Wklej", self.paste_params, 44)
-        sbtn("→seria", self.make_series_default, 50)
-        sbtn("Zeruj", self.reset_adjustments, 44)
+            b = T.button(act, text, cmd, width=w); b.configure(height=28, font=T.font(11)); b.pack(side="left", padx=(2, 0)); return b
+        self.undo_btn = sbtn("Cofnij", self.undo, 38)
+        self.redo_btn = sbtn("Ponów", self.redo, 38)
+        sbtn("Kopiuj", self.copy_params, 38)
+        self.paste_btn = sbtn("Wklej", self.paste_params, 36)
+        sbtn("→seria", self.make_series_default, 42)
+        sbtn("Zeruj", self.reset_adjustments, 36)
+
+        self.slider_tabs = T.segmented(hdr, SLIDER_TABS, command=self._slider_tab, dynamic_resizing=False, width=468)
+        self.slider_tabs.configure(font=T.font(11))
+        self.slider_tabs.set(SLIDER_TABS[0]); self.slider_tabs.pack(side="left")
 
         sl_area = ctk.CTkFrame(sl, fg_color=T.CARD, height=SLIDER_AREA_H)
         sl_area.pack(fill="x", expand=True); sl_area.pack_propagate(False)
@@ -229,7 +252,7 @@ class RetuszApp(ctk.CTk):
         b = T.button(wbc, "Balans → seria", self.sync_wb, width=118); b.configure(height=26); b.grid(row=1, column=1, sticky="w", padx=(6, 0))
         b = T.button(wbc, "Zeruj", self.reset_wb, width=56); b.configure(height=26); b.grid(row=1, column=2, sticky="w", padx=(6, 0))
 
-        # Tab 1: 3D Light direction in row 0, col 2 + Presets selector in row 1, col 3 + shortcut hint in row 2
+        # Tab 1: 3D Light direction in row 0, col 2 + Presets selector in row 1, col 3
         f1 = self.slider_frames[SLIDER_TABS[1]]
         cell = ctk.CTkFrame(f1, fg_color=T.CARD); cell.grid(row=0, column=2, sticky="ew", padx=6, pady=3)
         cell.grid_columnconfigure(0, weight=1)
@@ -254,10 +277,35 @@ class RetuszApp(ctk.CTk):
         )
         self.preset_menu.set("Portret naturalny"); self.preset_menu.grid(row=1, column=0, columnspan=3, sticky="ew")
 
-        # Tab 2 (Collapsible / on-demand Reference Match & ColorChecker bonus section):
-        f2 = self.slider_frames[SLIDER_TABS[2]]
+        # Tab 2: Detail & Sharpening ('Detal i Ostrość'): Sharpening mode selector at (0, 3) + Star Rating at (1, 3)
+        f_det = self.slider_frames[SLIDER_TABS[2]]
+        sh_cell = ctk.CTkFrame(f_det, fg_color=T.CARD); sh_cell.grid(row=0, column=3, sticky="ew", padx=6, pady=3)
+        sh_cell.grid_columnconfigure(0, weight=1)
+        T.label(sh_cell, "Tryb wyostrzania", 13, anchor="w").grid(row=0, column=0, sticky="w")
+        self.sharpen_mode_menu = ctk.CTkOptionMenu(
+            sh_cell, values=list(DET.SHARPEN_MODES.values()), command=self._set_sharpen_mode,
+            width=140, height=26, fg_color=T.BTN, button_color=T.BTN, button_hover_color=T.BTN_HOVER,
+            text_color=T.TEXT, font=T.font(11), dropdown_font=T.font(12), corner_radius=8
+        )
+        self.sharpen_mode_menu.set(DET.SHARPEN_MODES["portrait"])
+        self.sharpen_mode_menu.grid(row=1, column=0, sticky="ew")
+
+        st_cell = ctk.CTkFrame(f_det, fg_color=T.CARD); st_cell.grid(row=1, column=3, sticky="ew", padx=6, pady=3)
+        T.label(st_cell, "Ocena zdjęcia (★)", 13, anchor="w").grid(row=0, column=0, columnspan=6, sticky="w")
+        self.star_btns = []
+        for st_i in range(6):
+            txt = "0" if st_i == 0 else f"{st_i}★"
+            sb = T.button(st_cell, txt, lambda s=st_i: self._set_current_rating(s), width=22)
+            sb.configure(height=24, font=T.font(10), corner_radius=5)
+            sb.grid(row=1, column=st_i, padx=(0, 2), pady=(2, 0))
+            self.star_btns.append(sb)
+        T.label(f_det, "Wyostrzanie i odszumianie działa na żywo w podglądzie 100% oraz przy eksporcie (RL / Clamped USM 0% halo).",
+                11, T.MUTED, anchor="w").grid(row=2, column=0, columnspan=4, sticky="w", padx=6, pady=(8, 2))
+
+        # Tab 3 (Collapsible / on-demand Reference Match, Per-Photo Reference & ColorChecker bonus section):
+        f2 = self.slider_frames[SLIDER_TABS[3]]
         rc = ctk.CTkFrame(f2, fg_color=T.CARD); rc.grid(row=0, column=2, sticky="ew", padx=6, pady=3)
-        T.label(rc, "Wzorzec (AI)", 13, anchor="w").grid(row=0, column=0, columnspan=2, sticky="w")
+        T.label(rc, "Wzorzec serii (AI)", 13, anchor="w").grid(row=0, column=0, columnspan=2, sticky="w")
         b_ref = T.button(rc, "Wybierz…", self.choose_reference, accent=True, width=84); b_ref.configure(height=26)
         b_ref.grid(row=1, column=0, sticky="w", pady=(2, 0))
         self.clear_ref_btn = T.button(rc, "Wyłącz", self.clear_reference, width=64); self.clear_ref_btn.configure(height=26)
@@ -270,12 +318,25 @@ class RetuszApp(ctk.CTk):
         b_cc_cur = T.button(cc_cell, "Z kadru", self.calibrate_current_colorchecker, width=72); b_cc_cur.configure(height=26)
         b_cc_cur.grid(row=1, column=1, sticky="w", padx=(4, 0), pady=(2, 0))
 
+        pr_cell = ctk.CTkFrame(f2, fg_color=T.CARD); pr_cell.grid(row=1, column=0, columnspan=2, sticky="ew", padx=6, pady=3)
+        pr_cell.grid_columnconfigure(0, weight=1)
+        T.label(pr_cell, "Wzorzec tego zdjęcia (indywidualny)", 13, anchor="w").grid(row=0, column=0, columnspan=2, sticky="w")
+        self.photo_ref_menu = ctk.CTkOptionMenu(
+            pr_cell, values=["Domyślny serii", "Samodzielne (brak)"], command=self._on_photo_ref_menu,
+            width=180, height=26, fg_color=T.BTN, button_color=T.BTN, button_hover_color=T.BTN_HOVER,
+            text_color=T.TEXT, font=T.font(11), dropdown_font=T.font(12), corner_radius=8
+        )
+        self.photo_ref_menu.set("Domyślny serii")
+        self.photo_ref_menu.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        b_pref = T.button(pr_cell, "Własny…", self.choose_photo_reference, width=72); b_pref.configure(height=26)
+        b_pref.grid(row=1, column=1, sticky="e", padx=(6, 0), pady=(2, 0))
+
         self.ref_info_lbl = T.label(
             f2,
-            "Edytor działa samodzielnie bez wzorca. Wybierz zdjęcie wzorcowe albo zdjęcie z tablicą ColorChecker Classic (24 pola), aby skalibrować całą serię.",
-            12, T.MUTED, anchor="w", justify="left"
+            "Edytor działa samodzielnie bez wzorca. Wybierz wzorzec lub tablicę ColorChecker (24 pola), aby skalibrować serię.",
+            11, T.MUTED, anchor="w", justify="left", wraplength=330
         )
-        self.ref_info_lbl.grid(row=1, column=1, columnspan=3, sticky="w", padx=6, pady=(10, 2))
+        self.ref_info_lbl.grid(row=1, column=2, columnspan=2, sticky="w", padx=6, pady=(6, 2))
         f0.lift()
 
         tools = ctk.CTkFrame(ctl, fg_color=T.CARD)
@@ -522,9 +583,84 @@ class RetuszApp(ctk.CTk):
             self._set_status("Najpierw otwórz zdjęcie z tablicą ColorChecker."); return
         self.choose_colorchecker(self.photos[self.idx])
 
+    def _refresh_photo_ref_menu(self):
+        if not hasattr(self, "photo_ref_menu"): return
+        opts = ["Domyślny serii", "Samodzielne (brak)"]
+        if self.series is not None:
+            for bp in self.series.reference_bank:
+                label = f"Wzorzec: {bp.name}"
+                if label not in opts:
+                    opts.append(label)
+        rp = getattr(self.params, "reference_path", None)
+        if rp == "__none__":
+            cur = "Samodzielne (brak)"
+        elif rp:
+            cur = f"Wzorzec: {Path(rp).name}"
+            if cur not in opts:
+                opts.append(cur)
+        else:
+            cur = "Domyślny serii"
+        self.photo_ref_menu.configure(values=opts)
+        self.photo_ref_menu.set(cur)
+
+    def _on_photo_ref_menu(self, choice: str):
+        if self.idx < 0 or not self.photos or self.series is None: return
+        self._commit_history()
+        if choice == "Domyślny serii":
+            self.params.reference_path = None
+            self.params.ref_colorchecker = False
+        elif choice == "Samodzielne (brak)":
+            self.params.reference_path = "__none__"
+            self.params.ref_colorchecker = False
+        elif choice.startswith("Wzorzec: "):
+            fname = choice[len("Wzorzec: "):]
+            match = next((b for b in self.series.reference_bank if b.name == fname), None)
+            self.params.reference_path = str(match) if match is not None else fname
+            self.params.ref_colorchecker = False
+        self.series.set_override(self.photos[self.idx], self.params)
+        self._refresh_strip_marks(); self._update_override_label()
+        self._sync_photo_reference()
+
+    def choose_photo_reference(self):
+        if self.idx < 0 or not self.photos:
+            self._set_status("Najpierw otwórz zdjęcie."); return
+        p = filedialog.askopenfilename(title="Wybierz indywidualny wzorzec dla tego zdjęcia",
+                                       initialdir=self.settings.last_folder or None, filetypes=PHOTO_TYPES)
+        if not p: return
+        p = Path(p)
+        if self.series is None: self.series = Series(p.parent)
+        self._commit_history()
+        self.series.add_to_reference_bank(p)
+        self.params.reference_path = str(p)
+        self.params.ref_colorchecker = False
+        self.series.set_override(self.photos[self.idx], self.params)
+        self.series.save()
+        self._refresh_photo_ref_menu(); self._refresh_strip_marks(); self._update_override_label()
+        self._sync_photo_reference()
+
+    def _sync_photo_reference(self):
+        """Ensure self.reference matches the current photo's effective reference (per-photo override or series default)."""
+        if self.series is None or self.idx < 0 or not self.photos:
+            self.refit(); return
+        eff_path, eff_cc = self.series.effective_reference_for(self.photos[self.idx], self.params)
+        cur_path = self.reference.path if self.reference is not None else None
+        cur_cc = bool(getattr(self.reference, "colorchecker", False)) if self.reference is not None else False
+        if eff_path is None:
+            if self.reference is not None:
+                self.reference = None; self.ref_analysis = None; self.ref_prev = None
+                self.view_ref.set_image(None, keep_view=False)
+                self._sync_ref_ui()
+            self.fit = None; self.refit()
+        elif cur_path is None or cur_path.resolve() != eff_path.resolve() or cur_cc != eff_cc:
+            self.load_reference(eff_path, colorchecker=eff_cc)
+        else:
+            self.fit = None; self.refit()
+
     def load_reference(self, p: Path, colorchecker: bool = False):
         self._set_status("Kalibruję tablicę ColorChecker (24 pola)…" if colorchecker else "Wczytuję wzorzec…")
         side = self.settings.preview_side
+        if self.series is not None:
+            self.series.add_to_reference_bank(p)
         def work():
             ref = Reference(p, colorchecker=colorchecker)
             prev, icc = imageio.load_preview(p, side, with_icc=True)
@@ -539,7 +675,7 @@ class RetuszApp(ctk.CTk):
                 self.canvas_mode.set("Z wzorcem"); self._apply_canvas_layout()
             if colorchecker and cal_prev is None:
                 self._set_status("Nie wykryto tablicy ColorChecker 24 na zdjęciu – używam dopasowania wzorca.")
-            self._sync_ref_ui(); self.fit = None; self.refit()
+            self._refresh_photo_ref_menu(); self._sync_ref_ui(); self.fit = None; self.refit()
         self.submit(work, done)
 
     # ================= series strip =================
@@ -589,7 +725,8 @@ class RetuszApp(ctk.CTk):
         def done(r):
             if self.idx != i: return
             (self.src_prev, self.src_icc), self.src_size = r
-            self.view_src.set_image(self.src_prev, icc=self.src_icc, full_wh=self.src_size, keep_view=False); self._sync_zoom_label(); self.refit()
+            self.view_src.set_image(self.src_prev, icc=self.src_icc, full_wh=self.src_size, keep_view=False)
+            self._sync_zoom_label(); self._sync_photo_reference()
         self.submit(work, done, kind="load")
 
     def refit(self):
@@ -886,8 +1023,34 @@ class RetuszApp(ctk.CTk):
             val.configure(text=self._fmt(v, kind), text_color=self._val_color(key, pv))
         if p.light_angle is None: self.light_auto.select()
         else: self.light_auto.deselect(); self.light.set(p.light_angle)
+        if hasattr(self, "sharpen_mode_menu"):
+            self.sharpen_mode_menu.set(DET.SHARPEN_MODES.get(p.sharpen_mode, DET.SHARPEN_MODES["portrait"]))
+        self._update_star_btns(p.rating)
+        self._refresh_photo_ref_menu()
         self._show_light(); self._crop_ui_sync()
         self._update_override_label(); self._update_history_btns()
+
+    def _set_sharpen_mode(self, label: str):
+        inv = {v: k for k, v in DET.SHARPEN_MODES.items()}
+        mode = inv.get(label, "portrait")
+        if self.params.sharpen_mode == mode: return
+        self._commit_history()
+        self.params.sharpen_mode = mode
+        self._changed(discrete=True)
+
+    def _update_star_btns(self, rating: int):
+        for i, sb in enumerate(getattr(self, "star_btns", [])):
+            active = (i > 0 and i <= rating) or (i == 0 and rating == 0)
+            sb.configure(border_color=T.ACCENT if active else T.BORDER,
+                         text_color=T.ACCENT if (i > 0 and i <= rating) else T.TEXT)
+
+    def _set_current_rating(self, stars: int):
+        self.params.rating = int(np.clip(stars, 0, 5))
+        self._update_star_btns(self.params.rating)
+        if self.series is not None and 0 <= self.idx < len(self.photos):
+            self.series.set_override(self.photos[self.idx], self.params)
+            self._refresh_strip_marks(); self._update_override_label()
+        self._set_status(f"Ocena zdjęcia: {'★' * self.params.rating if self.params.rating else 'brak (0★)'}")
 
     def _auto_angle(self):
         r = self.fit.relight if self.fit is not None and self.fit.relight is not None else None
@@ -1234,12 +1397,30 @@ class RetuszApp(ctk.CTk):
         self.preset_menu.set(pr.name)
         self._set_status(f"Zapisano własny preset: {pr.name}")
 
-    # ================= compare =================
+    # ================= compare & library (Biblioteka G / Edycja D) =================
     def _disp(self, rgb):
         return CM.for_display(rgb, self.src_icc)
 
+    def show_library(self):
+        if self.compare.winfo_ismapped(): self.compare.pack_forget()
+        if not self.library.winfo_ismapped():
+            self.main.pack_forget()
+            self.library.pack(fill="both", expand=True, before=self.status)
+        self.library.refresh()
+
+    def hide_library(self):
+        if self.library.winfo_ismapped():
+            self.library.pack_forget()
+            self.main.pack(fill="both", expand=True, before=self.status)
+            self._refresh_strip_marks()
+
+    def toggle_library(self):
+        if self.library.winfo_ismapped(): self.hide_library()
+        else: self.show_library()
+
     def show_compare(self):
         if self.result is None: self._set_status("Najpierw otwórz zdjęcie."); return
+        if self.library.winfo_ismapped(): self.library.pack_forget()
         self.main.pack_forget(); self.compare.pack(fill="both", expand=True, before=self.status)
         self.compare.set_images(self._disp(self.src_prev), self._disp(self.result))
 
@@ -1256,6 +1437,43 @@ class RetuszApp(ctk.CTk):
     # ================= export =================
     def _out_dir(self, photo):
         return Path(photo).parent / self.settings.output_subfolder
+
+    def open_export_as(self):
+        if not self.photos or self.engine is None:
+            self._set_status("Najpierw otwórz zdjęcie lub folder."); return
+        cur_ph = self.photos[max(0, self.idx)]
+        def_dir = self._out_dir(cur_ph)
+        def_scope = "series" if (hasattr(self, "library") and self.library.winfo_ismapped() and len(self.photos) > 1) else "current"
+        ExportAsDialog(self, self.settings, def_dir, self._run_export_as, default_scope=def_scope)
+
+    def _run_export_as(self, scope_key: str, opts: export.ExportOptions, out_dir_str: str):
+        if not self.photos or self.engine is None: return
+        cur_ph = self.photos[max(0, self.idx)]
+        out_dir = Path(out_dir_str) if out_dir_str else self._out_dir(cur_ph)
+        if scope_key == "current" and 0 <= self.idx < len(self.photos) and self.fit is not None:
+            p, eng, ref, fit = self.photos[self.idx], self.engine, self.reference, self.fit
+            params = Params.from_dict(self.params.to_dict())
+            self._set_status(f"Eksportuję {p.name} ({export.FORMATS[opts.format]})…")
+            self.submit(lambda: batch.export_one(eng, ref, p, params, out_dir, opts, fit=fit),
+                        lambda dst: self._set_status(f"Zapisano: {dst}"))
+            return
+        if scope_key == "starred" and self.series is not None:
+            photos = [ph for ph in self.photos if self.series.params_for(ph).rating >= 1]
+            if not photos:
+                self._set_status("Brak zdjęć z gwiazdką (★) — oceń zdjęcia w Bibliotece lub zakładce Detal."); return
+        elif scope_key == "current":
+            photos = [cur_ph]
+        else:
+            photos = list(self.photos)
+        dlg = ProgressDialog(self, f"Eksport ({export.FORMATS[opts.format]}) · {len(photos)} zdjęć")
+        eng, ref, series = self.engine, self.reference, self.series
+        def prog(i, n, ph, sec): self._ui.put((lambda _: dlg.winfo_exists() and dlg.update_progress(i, n, f"{i}/{n} · {Path(ph).name} · {sec:.1f} s"), None))
+        def work():
+            res = batch.export_series(eng, ref, series, photos, out_dir, opts, prog, lambda: dlg.cancelled)
+            ok = sum(1 for r in res if r[1]); err = [r for r in res if r[2]]
+            msg = f"Gotowe: {ok} z {len(photos)} zapisanych w {out_dir}" + (f" · błędy: {len(err)}" if err else "")
+            self._ui.put((lambda _: dlg.winfo_exists() and dlg.done(msg), None)); self._ui.put((lambda _: self._set_status(msg), None))
+        threading.Thread(target=work, daemon=True).start()
 
     def save_current(self):
         if self.fit is None: self._set_status("Najpierw otwórz zdjęcie."); return

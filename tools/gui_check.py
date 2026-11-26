@@ -55,13 +55,19 @@ def script():
     app.redo(); pump(2)
     if abs(app.params.exposure) > 1e-4: print("REDO FAILED", app.params.exposure); ok = False
     app.toggle_before(True); pump(3); app.toggle_before(False); pump(2)
-    # Switch to second slider tab ("Portret i Plastyka") and third ("▸ Wzorzec (AI)") and check stability
+    # Switch to second ("Portret i Plastyka"), third ("Detal i Ostrość"), and fourth ("▸ Wzorzec (AI)") tabs and check stability
     app.slider_tabs.set("Portret i Plastyka"); app._slider_tab("Portret i Plastyka"); pump(4)
     grab("10b_wzorzec_portret.png")
     if geom() != g0: print("LAYOUT CHANGED by slider tab"); ok = False
+    app.slider_tabs.set("Detal i Ostrość"); app._slider_tab("Detal i Ostrość"); pump(4)
+    grab("10d_detal_ostrosc.png")
+    if geom() != g0: print("LAYOUT CHANGED by detail tab"); ok = False
     app.slider_tabs.set("▸ Wzorzec (AI)"); app._slider_tab("▸ Wzorzec (AI)"); pump(4)
     grab("10c_wzorzec_bonus.png")
     if geom() != g0: print("LAYOUT CHANGED by reference bonus tab"); ok = False
+    # Test Library module (Biblioteka G -> Edycja D)
+    app.show_library(); pump(8); grab("09_biblioteka.png"); app.hide_library(); pump(6)
+    if geom() != g0: print("LAYOUT CHANGED by library module toggle"); ok = False
     # Test Preset application + preset_to_series + undo
     app.apply_preset_by_name("Ciepły złoty"); pump(3)
     if abs(app.params.exposure - 0.15) > 1e-4: print("PRESET APPLY FAILED"); ok = False
@@ -77,6 +83,11 @@ def script():
     for k in ("skin_even", "skin_cast", "skin_hue", "clarity", "deshine", "blemish", "eyes_teeth"):
         s = app.sliders[k][0]
         for v in (0, 100, 0) if k in ("skin_even", "skin_cast", "deshine", "blemish", "eyes_teeth") else (-100, 100, 0): s.set(v); app._slider(k, v); pump(2)
+        if geom() != g0: print("LAYOUT CHANGED by", k); ok = False
+    app.slider_tabs.set("Detal i Ostrość"); app._slider_tab("Detal i Ostrość"); pump(3)
+    for k in ("sharpen_amount", "texture", "denoise", "brightness", "dehaze"):
+        s = app.sliders[k][0]
+        for v in (0, 80, 0) if k in ("sharpen_amount", "denoise") else (-80, 80, 0): s.set(v); app._slider(k, v); pump(2)
         if geom() != g0: print("LAYOUT CHANGED by", k); ok = False
     app.slider_tabs.set("Światło i Kolor"); app._slider_tab("Światło i Kolor"); pump(3)
     print("layout stable:", ok, flush=True)
@@ -103,12 +114,12 @@ def script():
     app.zoom_fit(); pump(5); print("fit zoom", app.zoom_lbl.cget("text"))
     app.brush_mode.set("Wył."); app.undo_stroke(); wait_render()
     new_features()
-    from retusz.gui.dialogs import SettingsDialog
+    from retusz.gui.dialogs import SettingsDialog, ExportAsDialog
     d = SettingsDialog(app, app.settings, lambda: None); pump(20); grab("13_ustawienia_ogolne.png", d)
-    d.children; 
     for w in d.winfo_children():
         if w.__class__.__name__ == "CTkTabview": w.set("Eksport")
     pump(10); grab("14_ustawienia_eksport.png", d); d.destroy()
+    ea = ExportAsDialog(app, app.settings, out, lambda *a: None); pump(15); grab("14b_eksportuj_jako.png", ea); ea.destroy()
     print("RESULT", "OK" if ok else "FAIL", flush=True)
     app.destroy()
 

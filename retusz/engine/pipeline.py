@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field, asdict, fields
 import numpy as np, cv2
 from . import color as C, faces as F, render as R, modflows as MF, relight as RL, dnb as DNB
-from . import wb as WB, geometry as GEO, tone as TN, colorchecker as CC, skin_physics as SP
+from . import wb as WB, geometry as GEO, tone as TN, colorchecker as CC, skin_physics as SP, detail as DET
 
 GRID = 33
 ANALYSIS_SIDE = 1200   # masks, zones, vignette, skin statistics
@@ -18,12 +18,14 @@ FIT_SIDE = 800         # AI encoder / IDT input
 
 @dataclass
 class Params:
-    """User controls. Ranges: strength/skin/vignette/db/plastic/skin_even/skin_cast/deshine/blemish/eyes_teeth/wide 0..1,
-    exposure -2..2 EV, contrast/shadows/highlights/whites/blacks/saturation/vibrance/clarity/skin_hue/temp/tint -1..1."""
+    """User controls. Ranges: strength/skin/vignette/db/plastic/skin_even/skin_cast/deshine/blemish/eyes_teeth/sharpen_amount/denoise/wide 0..1,
+    exposure -2..2 EV, contrast/brightness/dehaze/texture/shadows/highlights/whites/blacks/saturation/vibrance/clarity/skin_hue/temp/tint -1..1."""
     strength: float = 1.0
     skin: float = 1.0
     exposure: float = 0.0           # 'Ekspozycja' -2..2 EV (linear light + filmic shoulder)
     contrast: float = 0.0           # 'Kontrast' -1..1 (OKLab S-curve)
+    brightness: float = 0.0         # 'Jasność (Półtony)' -1..1 (Capture One midtone transfer in OKLab L)
+    dehaze: float = 0.0             # 'Zamglenie (Dehaze)' -1..1 (OKLab atmospheric veil removal)
     shadows: float = 0.0
     highlights: float = 0.0
     whites: float = 0.0             # 'Biele' -1..1 (OKLab upper endpoint)
@@ -32,6 +34,10 @@ class Params:
     db: float = 0.4
     plastic: float = 0.3            # 'Plastyka 3D'
     clarity: float = 0.0            # 'Przejrzystość' -1..1 (Fast LLF local mid-tone contrast, spares skin)
+    texture: float = 0.0            # 'Struktura' -1..1 (fine high-frequency detail band)
+    sharpen_amount: float = 0.0     # 'Ostrość' 0..1 (live in-editor & export sharpening)
+    sharpen_mode: str = "portrait"  # 'Tryb wyostrzania': portrait | rl | edges | soft
+    denoise: float = 0.0            # 'Odszumianie' 0..1 (edge-preserving OKLab chroma + luma denoise)
     light_angle: float | None = None  # 'Kierunek światła' in degrees, None = auto (from the reference)
     saturation: float = 0.0         # 'Nasycenie' -1..1
     vibrance: float = 0.0           # 'Jaskrawość' -1..1 (OKLab, boosts dull colours, spares skin)
@@ -48,6 +54,9 @@ class Params:
     crop: list | None = None        # [x0, y0, x1, y1] normalised in the straightened frame (per photo)
     aspect: str = "orig"            # crop preset key (geometry.ASPECTS)
     strokes: list = field(default_factory=list)  # manual dodge/burn, see brush_map()
+    rating: int = 0                 # 0..5 star rating per photo (Library module)
+    reference_path: str | None = None  # optional per-photo reference path override ('__none__' = standalone)
+    ref_colorchecker: bool = False  # whether per-photo reference is a ColorChecker 24 chart
 
     def to_dict(self):
         return asdict(self)
@@ -58,10 +67,16 @@ class Params:
         p = cls(**{k: v for k, v in (d or {}).items() if k in names})
         if p.light_angle is not None: p.light_angle = float(p.light_angle) % 360
         p.exposure = float(np.clip(p.exposure, -2.0, 2.0))
-        for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even", "skin_cast", "deshine", "blemish", "eyes_teeth", "wide"):
+        for k in ("strength", "skin", "vignette", "db", "plastic", "skin_even", "skin_cast",
+                  "deshine", "blemish", "eyes_teeth", "sharpen_amount", "denoise", "wide"):
             setattr(p, k, float(np.clip(getattr(p, k), 0, 1)))
-        for k in ("contrast", "shadows", "highlights", "whites", "blacks", "clarity", "saturation", "vibrance", "skin_hue", "temp", "tint"):
+        for k in ("contrast", "brightness", "dehaze", "texture", "shadows", "highlights", "whites", "blacks",
+                  "clarity", "saturation", "vibrance", "skin_hue", "temp", "tint"):
             setattr(p, k, float(np.clip(getattr(p, k), -1, 1)))
+        if p.sharpen_mode not in DET.SHARPEN_MODES: p.sharpen_mode = "portrait"
+        p.rating = int(np.clip(int(p.rating or 0), 0, 5))
+        p.reference_path = str(p.reference_path) if p.reference_path else None
+        p.ref_colorchecker = bool(p.ref_colorchecker)
         p.strokes = list(p.strokes or [])
         p.angle = float(np.clip(p.angle or 0.0, -45, 45))
         p.crop = GEO.clamp_crop(p.crop)
@@ -70,7 +85,7 @@ class Params:
 
     def colour_key(self):
         return tuple(round(getattr(self, k), 3) for k in (
-            "strength", "exposure", "contrast", "shadows", "highlights", "whites", "blacks",
+            "strength", "exposure", "contrast", "brightness", "dehaze", "shadows", "highlights", "whites", "blacks",
             "saturation", "vibrance", "skin_cast", "skin_hue", "wide", "temp", "tint"))
 
 @dataclass
@@ -385,13 +400,14 @@ class Engine:
             rgb = cv2.cvtColor(O.reshape(-1, 1, 3).astype(np.float32), cv2.COLOR_LAB2RGB).reshape(N, N, N, 3)
             rgb = np.clip(rgb, 0, 1)
         # Photographic tone & colour edits in linear light + OKLab (work even when strength == 0)
-        has_tone = any((p.exposure, p.contrast, p.highlights, p.shadows, p.whites, p.blacks,
+        has_tone = any((p.exposure, p.contrast, p.brightness, p.dehaze, p.highlights, p.shadows, p.whites, p.blacks,
                         p.saturation, p.vibrance, is_skin and (p.skin_cast or p.skin_hue)))
         if has_tone:
             lin = TN.srgb_to_lin(rgb)
             if p.exposure: lin = TN.apply_exposure_lin(lin, p.exposure)
-            if p.contrast or p.highlights or p.shadows or p.whites or p.blacks:
-                lin = TN.apply_tone_lin(lin, p.contrast, p.highlights, p.shadows, p.whites, p.blacks)
+            if p.contrast or p.brightness or p.dehaze or p.highlights or p.shadows or p.whites or p.blacks:
+                lin = TN.apply_tone_lin(lin, p.contrast, p.highlights, p.shadows, p.whites, p.blacks,
+                                        brightness=p.brightness, dehaze=p.dehaze)
             if is_skin and (p.skin_cast or p.skin_hue):
                 lin = TN.apply_skin_oklch(lin, p.skin_cast, p.skin_hue)
             if p.saturation or p.vibrance:
@@ -459,6 +475,9 @@ class Engine:
             out = SP.apply_portrait_details(out, mq_raw, [f*W for f in fit.faces_n],
                                             [l*W for l in lms] if lms else None,
                                             blemish=p.blemish, eyes_teeth=p.eyes_teeth)
+        if p.sharpen_amount > 1e-4 or abs(p.texture) > 1e-4 or p.denoise > 1e-4:
+            out = DET.apply_detail_pass(out, mq_raw, sharpen_amount=p.sharpen_amount,
+                                        sharpen_mode=p.sharpen_mode, texture=p.texture, denoise=p.denoise)
         T["dodge_burn_s"] = time.perf_counter()-t
         return (out, mq_raw) if return_mask else out
 
