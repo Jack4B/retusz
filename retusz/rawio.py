@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np, cv2
 from PIL import Image
 
-RAW_EXTS = {".nef", ".nrw"}
+RAW_EXTS = {".nef", ".nrw", ".cr2", ".cr3", ".arw", ".dng", ".raf", ".orf", ".rw2", ".pef"}
 KNEE = 0.8                   # linear value where the highlight shoulder starts
 TARGET_DEFAULT = 50.0        # mean CIE L* when the file has no embedded JPEG
 _Y = np.array([0.2126, 0.7152, 0.0722], np.float32)
@@ -40,6 +40,17 @@ def orient(a, flip):
 def shoulder(x):
     x = np.asarray(x, np.float32); k = KNEE
     return np.where(x <= k, x, k + (1-k)*(1-np.exp(-(x-k)/(1-k)))).astype(np.float32)
+
+def shoulder_rgb(lin, knee=KNEE):
+    """Chromaticity-preserving filmic highlight shoulder on 3-channel linear RGB (..., 3):
+    compresses by max(R, G, B) so R:G:B ratios (and skin hue) stay invariant above the knee,
+    rolling extreme speculars gently toward neutral white."""
+    x = np.maximum(np.asarray(lin, np.float32), 0.0)
+    mx = x.max(axis=-1, keepdims=True)
+    mx_out = np.where(mx <= knee, mx, knee + (1.0 - knee)*(1.0 - np.exp(-(mx - knee)/(1.0 - knee))))
+    scaled = x * (mx_out / np.maximum(mx, 1e-6))
+    desat = np.clip((mx - 1.35) / 1.5, 0.0, 1.0) ** 2
+    return np.clip(scaled*(1.0 - desat) + mx_out*desat, 0.0, 1.0).astype(np.float32)
 
 def encode(lin):
     lin = np.clip(lin, 0, 1)

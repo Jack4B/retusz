@@ -20,6 +20,16 @@ def _bilinear_up(q, H, W):
     wy = (ys-y0)[:, None]; wx = (xs-x0)[None, :]
     return ((q[y0][:, x0]*(1-wx) + q[y0][:, x1]*wx)*(1-wy) + (q[y1][:, x0]*(1-wx) + q[y1][:, x1]*wx)*wy).astype(np.float32)
 
+def _apply_gain_soft_knee(acc, g):
+    """Apply spatial gain `g` to `acc` in 0..1: linear for g <= 0 or below the 0.72 highlight knee,
+    rational headroom roll-off above k = max(0.72, acc) so bright skin pores never flat-clip to 1.0."""
+    v_lin = acc * (1.0 + g)
+    k = np.maximum(0.72, acc)
+    d = np.maximum(v_lin - k, 0.0)
+    h = np.maximum(1.0 - k, 0.0)
+    v_knee = k + (d * h) / (d + h + 1e-6)
+    return np.where((g > 0.0) & (v_lin > 0.72), v_knee, v_lin)
+
 def render_numpy(src, lut_bg, lut_sk, mask_q, gain_q, seed=12345):
     """Reference implementation (slow, used as fallback and in tests)."""
     from .color import apply_lut
@@ -28,7 +38,8 @@ def render_numpy(src, lut_bg, lut_sk, mask_q, gain_q, seed=12345):
     if gain_q.ndim == 2: gain_q = np.repeat(gain_q[..., None], 3, 2)
     g = np.dstack([_bilinear_up(gain_q[..., c], H, W) for c in range(3)])
     a = apply_lut(src, lut_bg); b = apply_lut(src, lut_sk)
-    o = (a + m*(b-a))*255*(1+g)
+    acc = a + m*(b-a)
+    o = _apply_gain_soft_knee(acc, g)*255.0
     y, x = np.mgrid[0:H, 0:W].astype(np.int64)
     h = (x*73856093) ^ (y*19349663) ^ seed
     d = ((h & 1023)/1023.0 - 0.5)[..., None]
@@ -37,6 +48,18 @@ def render_numpy(src, lut_bg, lut_sk, mask_q, gain_q, seed=12345):
 if HAVE_NUMBA:
     # frozen builds ship render.py next to the bytecode (see retusz.spec) so the JIT cache works there too
     _cache = (not getattr(sys, "frozen", False)) or os.path.exists(__file__)
+
+    @nb.njit(inline="always")
+    def _gain_channel(acc, g):
+        v_lin = acc * (1.0 + g)
+        if g <= 0.0 or v_lin <= 0.72:
+            return v_lin
+        k = 0.72 if acc < 0.72 else acc
+        d = v_lin - k
+        h = 1.0 - k
+        if h <= 0.0:
+            return acc
+        return k + (d * h) / (d + h + 1e-6)
 
     @nb.njit(parallel=True, fastmath=True, cache=_cache)
     def _render(src, lut_bg, lut_sk, mask_q, gain_q, out, seed):
@@ -92,7 +115,9 @@ if HAVE_NUMBA:
                 g2 = gain_q[y0, x0, 2]*w00 + gain_q[y0, x1, 2]*w01 + gain_q[y1, x0, 2]*w10 + gain_q[y1, x1, 2]*w11
                 h = (x*73856093) ^ (y*19349663) ^ seed
                 d = ((h & 1023)/1023.0) - 0.5
-                o0 = acc0*255.0*(1.0+g0) + d + 0.5; o1 = acc1*255.0*(1.0+g1) + d + 0.5; o2 = acc2*255.0*(1.0+g2) + d + 0.5
+                o0 = _gain_channel(acc0, g0)*255.0 + d + 0.5
+                o1 = _gain_channel(acc1, g1)*255.0 + d + 0.5
+                o2 = _gain_channel(acc2, g2)*255.0 + d + 0.5
                 out[y, x, 0] = 0 if o0 < 0 else (255 if o0 > 255 else np.uint8(o0))
                 out[y, x, 1] = 0 if o1 < 0 else (255 if o1 > 255 else np.uint8(o1))
                 out[y, x, 2] = 0 if o2 < 0 else (255 if o2 > 255 else np.uint8(o2))
@@ -112,3 +137,4 @@ def warmup():
     """Compile the kernel once (takes ~1-2 s on first ever run, later loaded from cache)."""
     z = np.zeros((8, 8, 3), np.uint8); l = np.zeros((3, 3, 3, 3), np.float32); q = np.zeros((2, 2), np.float32)
     render(z, l, l, q, q)
+

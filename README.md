@@ -1,4 +1,4 @@
-# Retusz 0.3.0
+# Retusz 0.4.0
 
 Aplikacja na Windows: pełnoprawny edytor portretowy z obróbką tonalną i barwną w przestrzeni OKLab (Ekspozycja EV, Kontrast,
 Światła/Cienie, Biele/Czernie, Balans bieli Bradford CAT, Przejrzystość), kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**,
@@ -8,6 +8,15 @@ biblioteką **Presetów**, przenoszeniem gradingu z AI oraz opcjonalnym dopasowa
 ## Kontrola jakości
 
 `tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--colorchecker` sprawdza detekcję i kalibrację 24 pól ColorChecker (średnie ΔE₀₀ < 1,2, skóra < 1,0, szarości < 0,8).
+
+### 0.4.0
+- **Jakość studyjna potoku obrazu (RAW / Soft-Knee / Linear Downsizing / Halo-Free USM / 16-bit TIFF)**:
+  - **zachowujące barwę łagodzenie świateł RAW (`rawio.shoulder_rgb`)** oraz rozszerzenie obsługi formatów RAW o **`.nef`, `.nrw`, `.cr2`, `.cr3`, `.arw`, `.dng`, `.raf`, `.orf`, `.rw2`, `.pef`**;
+  - **ochrona tekstury porów w światłach (`_gain_channel` / `apply_gain_soft_knee`)** w jądrze renderującym (Numba, NumPy, Rust, WGSL): dodatni zysk przestrzenny (Plastyka 3D, Przejrzystość, Pędzel Rozjaśnij) jest płynnie kompresowany wymierną funkcją zapasu do bieli, dzięki czemu jasne czoło i grzbiet nosa nigdy nie tracą faktury porów;
+  - **skalowanie wyjściowe w świetle liniowym (`export.resize_long_edge`)**: zachowuje pełną energię fotonów w blikach oczu, biżuterii i drobnych jasnych detalach przy zmniejszaniu zdjęć do internetu;
+  - **bezhalowe wyostrzanie wyjściowe (`export.sharpen`)**: ograniczenie sygnału USM lokalną obwiednią morfologiczną 3×3 eliminuje jasne obwódki (overshoot) wokół ciemnych oprawek okularów i rzęs;
+  - **eksport 16-bit TIFF (LZW + profil ICC) oraz bezstratny PNG** obok JPG w `Ustawienia → Eksport` i CLI (`--format jpg|tiff16|png`);
+  - przycisk **`→ seria`** bezpośrednio na głównym pasku akcji suwaków do błyskawicznego przeniesienia całego wypracowanego looku na całą sesję.
 
 ### 0.3.0
 - **Kalibracja ColorChecker Classic (24 pola + raport ΔE₀₀)** (`retusz/engine/colorchecker.py`, `crates/retusz-core/src/colorchecker.rs`):

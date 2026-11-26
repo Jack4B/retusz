@@ -3,7 +3,7 @@
 //! Author: Jack4B.
 
 use bytemuck::{Pod, Zeroable};
-use retusz_core::color::{lin_to_srgb, srgb_to_lin, Lut3D};
+use retusz_core::color::Lut3D;
 use wgpu::util::DeviceExt;
 
 pub const SHADER_MAIN_WGSL: &str = include_str!("shaders/render_main.wgsl");
@@ -269,12 +269,17 @@ pub fn render_lut_gain_cpu(
                 g *= (1.0 + 0.55 * vignette * r2 * r2).clamp(0.25, 1.75);
             }
             if (g - 1.0).abs() > 1e-4 {
-                let lin = srgb_to_lin(c);
-                c = lin_to_srgb([
-                    (lin[0] * g).clamp(0.0, 1.0),
-                    (lin[1] * g).clamp(0.0, 1.0),
-                    (lin[2] * g).clamp(0.0, 1.0),
-                ]);
+                for ch in &mut c {
+                    let v_lin = *ch * g;
+                    if g <= 1.0 || v_lin <= 0.72 {
+                        *ch = v_lin.clamp(0.0, 1.0);
+                    } else {
+                        let k = ch.max(0.72);
+                        let d = v_lin - k;
+                        let hr = (1.0 - k).max(0.0);
+                        *ch = (k + (d * hr) / (d + hr + 1e-6)).clamp(0.0, 1.0);
+                    }
+                }
             }
             let mut ro = (c[0].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
             let mut go = (c[1].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;

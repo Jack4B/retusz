@@ -22,6 +22,7 @@ def main(argv=None):
     ap.add_argument("--out"); ap.add_argument("--quality", type=int, default=95)
     ap.add_argument("--method", choices=list(models.METHODS), default="ai")
     ap.add_argument("--long-edge", type=int, default=0); ap.add_argument("--suffix", default="")
+    ap.add_argument("--format", choices=list(export.FORMATS), default="jpg")
     ap.add_argument("--profile", choices=list(export.CM.OUTPUT_PROFILES), default="keep")
     ap.add_argument("--sharpen", choices=list(export.SHARPEN), default="screen")
     a = ap.parse_args(argv)
@@ -41,7 +42,7 @@ def main(argv=None):
     print(f"Silnik: {eff} · {eng.device()} · {len(photos)} zdjęć")
     ref = Reference(ref_p, colorchecker=is_cc) if ref_p is not None else None
     out = Path(a.out) if a.out else folder / "Retusz"; t = time.perf_counter()
-    opts = export.ExportOptions(quality=a.quality, long_edge=a.long_edge, profile=a.profile, sharpen=a.sharpen, suffix=a.suffix)
+    opts = export.ExportOptions(format=a.format, quality=a.quality, long_edge=a.long_edge, profile=a.profile, sharpen=a.sharpen, suffix=a.suffix)
     res = batch.export_series(eng, ref, series, photos, out, opts,
                               progress=lambda i, n, ph, s: print(f"{i}/{n} {Path(ph).name} {s:.2f} s"))
     errs = [r for r in res if r[2]]

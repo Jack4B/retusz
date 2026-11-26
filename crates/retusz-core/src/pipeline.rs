@@ -200,12 +200,17 @@ pub fn render_photo_cpu(
                     g *= (1.0 + 0.55 * vig * r2 * r2).clamp(0.25, 1.75);
                 }
                 if (g - 1.0).abs() > 1e-4 {
-                    let lin = srgb_to_lin(c);
-                    c = lin_to_srgb([
-                        (lin[0] * g).clamp(0.0, 1.0),
-                        (lin[1] * g).clamp(0.0, 1.0),
-                        (lin[2] * g).clamp(0.0, 1.0),
-                    ]);
+                    for ch in &mut c {
+                        let v_lin = *ch * g;
+                        if g <= 1.0 || v_lin <= 0.72 {
+                            *ch = v_lin.clamp(0.0, 1.0);
+                        } else {
+                            let k = ch.max(0.72);
+                            let d = v_lin - k;
+                            let hr = (1.0 - k).max(0.0);
+                            *ch = (k + (d * hr) / (d + hr + 1e-6)).clamp(0.0, 1.0);
+                        }
+                    }
                 }
                 dst_row[x * 3] = (c[0].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
                 dst_row[x * 3 + 1] = (c[1].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
