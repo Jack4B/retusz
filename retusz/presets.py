@@ -13,8 +13,8 @@ from .engine.pipeline import Params
 
 PRESET_EXT = ".retusz-preset.json"
 PRESET_KEYS = (
-    "exposure", "contrast", "highlights", "shadows", "whites", "blacks",
-    "clarity", "vibrance", "saturation", "vignette", "db", "plastic",
+    "exposure", "contrast", "brightness", "dehaze", "highlights", "shadows", "whites", "blacks",
+    "clarity", "texture", "sharpen_amount", "denoise", "vibrance", "saturation", "vignette", "db", "plastic",
     "wide", "temp", "tint", "skin_even", "skin_cast", "skin_hue",
     "deshine", "blemish", "eyes_teeth",
 )

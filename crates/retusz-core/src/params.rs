@@ -12,6 +12,8 @@ fn default_true() -> bool { true }
 fn default_aspect() -> String { "free".to_string() }
 fn default_preset_cat() -> String { "Własne".to_string() }
 
+fn default_sharpen_mode() -> String { "portrait".to_string() }
+
 /// Non-destructive photographic and portrait adjustment parameters.
 /// Fully backwards-compatible with `*.retusz.json` and `retusz-seria.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -37,6 +39,10 @@ pub struct Params {
     #[serde(default)]
     pub contrast: f32,       // -1.0 .. +1.0
     #[serde(default)]
+    pub brightness: f32,     // -1.0 .. +1.0 ('Jasność / Półtony' Capture One midtone curve)
+    #[serde(default)]
+    pub dehaze: f32,         // -1.0 .. +1.0 ('Zamglenie / Dehaze' OKLab veil removal)
+    #[serde(default)]
     pub highlights: f32,     // -1.0 .. +1.0
     #[serde(default)]
     pub shadows: f32,        // -1.0 .. +1.0
@@ -46,6 +52,14 @@ pub struct Params {
     pub blacks: f32,         // -1.0 .. +1.0
     #[serde(default)]
     pub clarity: f32,        // -1.0 .. +1.0
+    #[serde(default)]
+    pub texture: f32,        // -1.0 .. +1.0 ('Struktura')
+    #[serde(default)]
+    pub sharpen_amount: f32, //  0.0 .. +1.0 ('Ostrość')
+    #[serde(default = "default_sharpen_mode")]
+    pub sharpen_mode: String,// 'portrait' | 'rl' | 'edges' | 'soft'
+    #[serde(default)]
+    pub denoise: f32,        //  0.0 .. +1.0 ('Odszumianie')
     #[serde(default)]
     pub vibrance: f32,       // -1.0 .. +1.0
     #[serde(default)]
@@ -70,6 +84,12 @@ pub struct Params {
     pub crop: Option<[f32; 4]>,
     #[serde(default = "default_aspect", alias = "crop_aspect")]
     pub aspect: String,
+    #[serde(default)]
+    pub rating: u8,
+    #[serde(default)]
+    pub reference_path: Option<String>,
+    #[serde(default)]
+    pub ref_colorchecker: bool,
 }
 
 impl Default for Params {
@@ -85,11 +105,17 @@ impl Default for Params {
             eyes_teeth: 0.0,
             exposure: 0.0,
             contrast: 0.0,
+            brightness: 0.0,
+            dehaze: 0.0,
             highlights: 0.0,
             shadows: 0.0,
             whites: 0.0,
             blacks: 0.0,
             clarity: 0.0,
+            texture: 0.0,
+            sharpen_amount: 0.0,
+            sharpen_mode: "portrait".to_string(),
+            denoise: 0.0,
             vibrance: 0.0,
             saturation: 0.0,
             vignette: 0.0,
@@ -102,6 +128,9 @@ impl Default for Params {
             angle: 0.0,
             crop: None,
             aspect: "orig".to_string(),
+            rating: 0,
+            reference_path: None,
+            ref_colorchecker: false,
         }
     }
 }

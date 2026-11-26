@@ -207,3 +207,115 @@ class ProgressDialog(_Dialog):
     def cancel(self):
         if self.btn.cget("text") == "Zamknij": self.destroy(); return
         self.cancelled = True; self.status.configure(text="Przerywam po bieżącym zdjęciu…")
+
+
+class ExportAsDialog(_Dialog):
+    """Okno 'Eksportuj jako… (Ctrl+Shift+E)': szybki wybór zakresu (bieżące zdjęcie / wybrane ★ / cała seria),
+    formatu (JPG 8-bit, TIFF 16-bit, TIFF 8-bit, PNG 16-bit, PNG 8-bit, WebP), przestrzeni barwnej ICC
+    (Jak oryginał, sRGB, Display P3, Adobe RGB 1998, ProPhoto RGB), rozmiaru, wyostrzania i folderu docelowego."""
+    SCOPES = {
+        "current": "Bieżące zdjęcie",
+        "starred": "Wybrane zdjęcia (★)",
+        "series": "Cała seria",
+    }
+
+    def __init__(self, master, settings, default_dir, on_export, default_scope="current"):
+        super().__init__(master, "Eksportuj jako…", 560, 560)
+        self.s = settings
+        self.on_export = on_export
+        o = settings.export_options()
+
+        row_b = ctk.CTkFrame(self, fg_color=T.BG)
+        row_b.pack(side="bottom", fill="x", padx=20, pady=(6, 14))
+        T.button(row_b, "Eksportuj teraz", self._run, accent=True, width=140).pack(side="right")
+        T.button(row_b, "Anuluj", self.destroy, width=90).pack(side="right", padx=8)
+
+        g = SettingsDialog._grid(self)
+        r = 0
+        T.label(g, "Eksportuj zdjęcie lub serię (Eksportuj jako…)", 15, weight="bold").grid(
+            row=r, column=0, columnspan=3, sticky="w", pady=(4, 10)
+        )
+        r += 1
+
+        SettingsDialog._lbl(g, "Zakres eksportu", r)
+        self.scope = SettingsDialog._menu(g, list(self.SCOPES.values()), self.SCOPES.get(default_scope, self.SCOPES["current"]), r)
+        r += 1
+
+        SettingsDialog._lbl(g, "Format i głębia", r)
+        self.fmt = SettingsDialog._menu(g, list(EX.FORMATS.values()), EX.FORMATS.get(o.format, EX.FORMATS["jpg"]), r)
+        r += 1
+
+        SettingsDialog._lbl(g, "Przestrzeń barwna ICC", r)
+        self.prof = SettingsDialog._menu(g, list(CM.OUTPUT_PROFILES.values()), CM.OUTPUT_PROFILES.get(o.profile, CM.OUTPUT_PROFILES["keep"]), r)
+        r += 1
+
+        SettingsDialog._lbl(g, "Jakość (JPG / WebP)", r)
+        self.q = ctk.CTkSlider(g, from_=50, to=100, number_of_steps=50, progress_color=T.ACCENT, button_color=T.ACCENT)
+        self.q.set(o.quality)
+        self.q.grid(row=r, column=1, sticky="ew", pady=5)
+        r += 1
+
+        SettingsDialog._lbl(g, "Próbkowanie koloru", r)
+        self.sub = SettingsDialog._menu(g, list(EX.SUBSAMPLING), o.subsampling, r)
+        r += 1
+
+        SettingsDialog._lbl(g, "Dłuższy bok (px)", r)
+        self.edge = ctk.CTkEntry(g, width=110, fg_color=T.CARD, border_color=T.BORDER, text_color=T.TEXT)
+        self.edge.insert(0, str(o.long_edge or ""))
+        self.edge.grid(row=r, column=1, sticky="w", pady=5)
+        T.label(g, "puste = pełna rozdzielczość (światło liniowe)", 11, T.MUTED).grid(
+            row=r, column=1, columnspan=2, padx=(118, 0), sticky="w"
+        )
+        r += 1
+
+        SettingsDialog._lbl(g, "DPI", r)
+        self.dpi = ctk.CTkEntry(g, width=90, fg_color=T.CARD, border_color=T.BORDER, text_color=T.TEXT)
+        self.dpi.insert(0, str(o.dpi))
+        self.dpi.grid(row=r, column=1, sticky="w", pady=5)
+        r += 1
+
+        SettingsDialog._lbl(g, "Wyostrzanie wyjściowe", r)
+        self.sh = SettingsDialog._menu(g, list(EX.SHARPEN.values()), EX.SHARPEN.get(o.sharpen, EX.SHARPEN["screen"]), r)
+        r += 1
+
+        SettingsDialog._lbl(g, "Przyrostek nazwy", r)
+        self.suf = ctk.CTkEntry(g, width=140, fg_color=T.CARD, border_color=T.BORDER, text_color=T.TEXT, placeholder_text="np. _studio")
+        if o.suffix:
+            self.suf.insert(0, o.suffix)
+        self.suf.grid(row=r, column=1, sticky="w", pady=5)
+        r += 1
+
+        SettingsDialog._lbl(g, "Folder docelowy", r)
+        d_row = ctk.CTkFrame(g, fg_color=T.BG)
+        d_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=5)
+        d_row.grid_columnconfigure(0, weight=1)
+        self.dir_entry = ctk.CTkEntry(d_row, fg_color=T.CARD, border_color=T.BORDER, text_color=T.TEXT)
+        self.dir_entry.insert(0, str(default_dir or ""))
+        self.dir_entry.grid(row=0, column=0, sticky="ew")
+        T.button(d_row, "Wybierz…", self._pick_dir, width=84).grid(row=0, column=1, padx=(6, 0))
+
+    def _pick_dir(self):
+        p = filedialog.askdirectory(parent=self, title="Wybierz folder eksportu", initialdir=self.dir_entry.get() or None)
+        if p:
+            self.dir_entry.delete(0, "end")
+            self.dir_entry.insert(0, p)
+
+    def _run(self):
+        inv = lambda d, v: {b: a for a, b in d.items()}[v]
+        base_o = self.s.export_options()
+        opts = EX.ExportOptions.from_dict({
+            **base_o.to_dict(),
+            "format": inv(EX.FORMATS, self.fmt.get()),
+            "profile": inv(CM.OUTPUT_PROFILES, self.prof.get()),
+            "quality": int(round(self.q.get())),
+            "subsampling": self.sub.get(),
+            "long_edge": SettingsDialog._int(self.edge, 0),
+            "dpi": SettingsDialog._int(self.dpi, 300),
+            "sharpen": inv(EX.SHARPEN, self.sh.get()),
+            "suffix": self.suf.get().strip(),
+        })
+        scope_key = inv(self.SCOPES, self.scope.get())
+        out_dir = self.dir_entry.get().strip()
+        self.destroy()
+        self.on_export(scope_key, opts, out_dir)
+

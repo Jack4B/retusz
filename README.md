@@ -1,15 +1,31 @@
-# Retusz 0.5.0
+# Retusz 0.6.0
 
-Aplikacja na Windows: pełnoprawny edytor portretowy z obróbką tonalną i barwną w przestrzeni OKLab (Ekspozycja EV, Kontrast,
-Światła/Cienie, Biele/Czernie, Balans bieli Bradford CAT, Przejrzystość na Szybkiej Piramidzie Laplace'a Fast LLF),
-kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**, biofizyczną optyką skóry (**Melanina/Hemoglobina**,
-dychromatyczna **Redukcja połysku SUV De-Shine**, dwupasmowe **Niedoskonałości Auto-Heal** z zachowaniem porów,
-anatomiczny retusz **Oczy i zęby**), **Wektorskopem Linii Skóry OKLCh (52°)**, **Plastyką 3D**, subtelnym **dodge & burn**,
-biblioteką **Presetów**, przenoszeniem gradingu z AI oraz opcjonalnym dopasowaniem kolorów do wzorca. Autor: Jack4B.
+Aplikacja na Windows: pełnoprawny edytor portretowy z modułami **Biblioteka (G)** i **Edycja (D)**, obróbką tonalną i barwną w przestrzeni OKLab
+(Ekspozycja EV, Kontrast, Jasność półtonów Capture One, Dehaze, Światła/Cienie, Biele/Czernie, Balans bieli Bradford CAT, Przejrzystość Fast LLF),
+kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**, obsługą **wielu wzorców kolorystycznych w jednej serii**,
+zakładką **Detal i Ostrość** (4 tryby wyostrzania: Portret z ochroną skóry, Dekonwolucja RL obiektywu, Krawędzie Clamped USM, Miękki blask + Struktura i Odszumianie OKLab),
+biofizyczną optyką skóry (**Melanina/Hemoglobina**, **Redukcja połysku SUV De-Shine**, **Niedoskonałości Auto-Heal**, **Oczy i zęby**),
+**Wektorskopem Linii Skóry OKLCh (52°)**, **Plastyką 3D**, subtelnym **dodge & burn** oraz oknem **Eksportuj jako… (TIFF/PNG 16-bit, WebP, JPG 4:4:4, ProPhoto RGB, Display P3, Adobe RGB, sRGB)**. Autor: Jack4B.
 
 ## Kontrola jakości
 
 `tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--colorchecker` sprawdza detekcję i kalibrację 24 pól ColorChecker (średnie ΔE₀₀ < 1,2, skóra < 1,0, szarości < 0,8).
+
+### 0.6.0
+- **Moduły `Biblioteka (G)` i `Edycja (D)` w stylu Lightroom / Capture One** (`retusz/gui/library.py`, `retusz/gui/app.py`):
+  - **Biblioteka (`G`)**: widok siatki miniatur serii (Contact Sheet) z filtrowaniem (`Wszystkie`, `Wybrane ★`, `Edytowane ●`), oceną gwiazdkową `1–5 ★`, znacznikiem aktywnego wzorca na każdej karcie, wielokrotnym zaznaczaniem do grupowego przypisywania wzorców lub presetów oraz przejściem do **Edycji (`D`)**;
+  - **Wiele wzorców kolorystycznych w jednej serii (`reference_path`, `reference_bank`)** (`retusz/sidecar.py`, `retusz/batch.py`): każde zdjęcie w serii może używać domyślnego wzorca serii, własnego indywidualnego wzorca kolorystycznego / tablicy ColorChecker 24 albo być edytowane całkowicie samodzielnie (`Samodzielne (brak)`).
+- **Zakładka `Detal i Ostrość` oraz parametry klasy Capture One / Lightroom** (`retusz/engine/detail.py`, `retusz/engine/tone.py`):
+  - **4 tryby wyostrzania na żywo (`sharpen_mode` + `Ostrość`)**:
+    1. *Portret (ochrona skóry)* — morfologiczny Clamped USM (0% halo) z automatycznym tłumieniem wyostrzania porów na gładkiej skórze,
+    2. *Dekonwolucja RL (obiektyw)* — 3-iteracyjna tłumiona dekonwolucja Richardsona-Lucy'ego odzyskująca ostrość dyfrakcyjną obiektywu bez obwódek USM,
+    3. *Krawędzie (Clamped USM)* — pełnokadrowy USM bez halo,
+    4. *Miękki blask (Soft Focus)* — optyczna dyfuzja portretowa;
+  - **Struktura (`texture`)** (mikrodetal wysokich częstotliwości), **Odszumianie (`denoise`)** (dwupasmowe odszumianie chrominancji OKLab i szumu luminancji w cieniach), **Jasność / Półtony (`brightness`)** (krzywa półtonów Capture One w OKLab $L$ z zamrożonym punktem czerni i bieli) oraz **Zamglenie (`dehaze`)** (usuwanie mgiełki atmosferycznej i flary pod światło).
+- **Okno `Eksportuj jako… (Ctrl+Shift+E)` — 6 formatów i 5 przestrzeni barwnych ICC** (`retusz/export.py`, `retusz/colorman.py`, `retusz/gui/dialogs.py`):
+  - wybór zakresu (`Bieżące zdjęcie`, `Wybrane zdjęcia ★`, `Cała seria`),
+  - **6 formatów**: `JPG (8-bit, 4:4:4)`, `TIFF (16-bit, LZW)`, `TIFF (8-bit, LZW)`, `PNG (16-bit, bezstratny)`, `PNG (8-bit, bezstratny)`, `WebP (bezstratny)`,
+  - **5 przestrzeni barwnych ICC**: `Jak oryginał`, `sRGB`, `Display P3`, `Adobe RGB (1998)`, `ProPhoto RGB (ROMM)`.
 
 ### 0.5.0
 - **Biofizyczna optyka skóry, dychromatyczny De-Shine SUV, Fast LLF i Wektorskop OKLCh** (`retusz/engine/skin_physics.py`, `retusz/engine/llf.py`, `crates/retusz-core/src/skin_physics.rs`):

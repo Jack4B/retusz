@@ -28,29 +28,71 @@ def _read_json(path: Path):
         return None
 
 def _per_photo_only(p: Params) -> Params:
-    """Brush strokes, straighten and crop always belong to one photo, never to the series."""
-    p.strokes = []; p.angle = 0.0; p.crop = None
+    """Brush strokes, straighten, crop, star rating, and per-photo reference override always belong to one photo."""
+    p.strokes = []; p.angle = 0.0; p.crop = None; p.rating = 0; p.reference_path = None; p.ref_colorchecker = False
     return p
 
 class Series:
     def __init__(self, folder):
         self.folder = Path(folder); self.reference: Path | None = None; self.params = Params()
+        self.ref_colorchecker: bool = False
+        self.reference_bank: list[Path] = []
         d = _read_json(self.folder / SERIES_FILE)
         if d:
             ref = d.get("reference")
             if ref:
                 rp = Path(ref); rp = rp if rp.is_absolute() else self.folder / rp
                 self.reference = rp
+            self.ref_colorchecker = bool(d.get("ref_colorchecker", False))
+            for item in d.get("reference_bank") or []:
+                bp = Path(item); bp = bp if bp.is_absolute() else self.folder / bp
+                if bp not in self.reference_bank:
+                    self.reference_bank.append(bp)
+            if self.reference and self.reference not in self.reference_bank:
+                self.reference_bank.insert(0, self.reference)
             self.params = Params.from_dict(d.get("params"))
             _per_photo_only(self.params)
 
+    def _rel_or_abs(self, path: Path) -> str:
+        try:
+            return str(Path(path).resolve().relative_to(self.folder.resolve()))
+        except ValueError:
+            return str(Path(path).resolve())
+
+    def add_to_reference_bank(self, path: Path) -> Path:
+        p = Path(path)
+        p = p if p.is_absolute() else (self.folder / p)
+        if all(b.resolve() != p.resolve() for b in self.reference_bank):
+            self.reference_bank.append(p)
+        return p
+
+    def effective_reference_for(self, photo, params: Params | None = None) -> tuple[Path | None, bool]:
+        """Resolve the effective reference (path, colorchecker_flag) for a specific photo:
+        - params.reference_path == '__none__' -> (None, False) (standalone edit for this photo)
+        - params.reference_path set -> (resolved_path, params.ref_colorchecker)
+        - otherwise -> (self.reference, self.ref_colorchecker)"""
+        p = params if params is not None else self.params_for(photo)
+        rp = getattr(p, "reference_path", None)
+        if rp == "__none__":
+            return None, False
+        if rp:
+            path = Path(rp)
+            if not path.is_absolute():
+                path = self.folder / path
+            if path.exists():
+                return path, bool(getattr(p, "ref_colorchecker", False))
+        return self.reference, self.ref_colorchecker
+
     def save(self):
-        ref = None
+        ref = self._rel_or_abs(self.reference) if self.reference else None
         if self.reference:
-            try: ref = str(Path(self.reference).resolve().relative_to(self.folder.resolve()))
-            except ValueError: ref = str(Path(self.reference).resolve())
+            self.add_to_reference_bank(self.reference)
+        bank = [self._rel_or_abs(b) for b in self.reference_bank]
         p = _per_photo_only(Params.from_dict(self.params.to_dict())).to_dict()
-        _write_json(self.folder / SERIES_FILE, {"version": VERSION, "app": "Retusz", "reference": ref, "params": p})
+        _write_json(self.folder / SERIES_FILE, {
+            "version": VERSION, "app": "Retusz", "reference": ref,
+            "ref_colorchecker": self.ref_colorchecker, "reference_bank": bank, "params": p,
+        })
 
     def has_override(self, photo) -> bool:
         return sidecar_path(photo).exists()
@@ -62,6 +104,12 @@ class Series:
         return Params.from_dict(self.params.to_dict())
 
     def set_override(self, photo, params: Params):
+        if params.reference_path and params.reference_path != "__none__":
+            rp = Path(params.reference_path)
+            rp = rp if rp.is_absolute() else (self.folder / rp)
+            if rp.exists():
+                self.add_to_reference_bank(rp)
+                params.reference_path = self._rel_or_abs(rp)
         _write_json(sidecar_path(photo), {"version": VERSION, "app": "Retusz", "photo": Path(photo).name, "params": params.to_dict()})
 
     def clear_override(self, photo):
@@ -70,8 +118,11 @@ class Series:
 
     def sync_fields(self, photos, values: dict):
         """Copy some controls (e.g. white balance) to the series defaults and to every photo that has
-        its own settings; photos without a sidecar follow the series anyway."""
-        for k, v in values.items(): setattr(self.params, k, v)
+        its own settings; photos without a sidecar follow the series anyway. Per-photo rating, geometry,
+        and per-photo reference_path are preserved unless explicitly included in values."""
+        for k, v in values.items():
+            if k not in ("strokes", "angle", "crop", "rating", "reference_path", "ref_colorchecker"):
+                setattr(self.params, k, v)
         self.params = Params.from_dict(self.params.to_dict()); self.save()
         for ph in photos:
             if self.has_override(ph):

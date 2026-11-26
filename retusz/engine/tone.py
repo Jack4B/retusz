@@ -117,14 +117,21 @@ def apply_exposure_lin(lin, ev: float, knee: float = 0.82):
 
 
 def apply_tone_lin(lin, contrast: float = 0.0, highlights: float = 0.0, shadows: float = 0.0,
-                   whites: float = 0.0, blacks: float = 0.0):
+                   whites: float = 0.0, blacks: float = 0.0, brightness: float = 0.0, dehaze: float = 0.0):
     """Perceptual tone controls in OKLab L: monotonic S-curve contrast around 18 % grey (L=0.58),
+    Capture One style midtone brightness (pinned at black 0 and white 1), atmospheric dehaze,
     mid-shadow/mid-highlight recovery, and black/white endpoint controls. Constant-hue gamut clipped."""
-    if not (contrast or highlights or shadows or whites or blacks):
+    if not (contrast or highlights or shadows or whites or blacks or brightness or dehaze):
         return np.asarray(lin, np.float32)
     ok = lin_to_oklab(np.clip(lin, 0.0, 1.0))
     L = np.clip(ok[..., 0], 0.0, 1.0)
     dL = np.zeros_like(L)
+    if brightness:
+        # Capture One midtone brightness: smooth bell pinned at L=0 and L=1
+        dL += np.float32(brightness * 0.34) * L * (1.0 - L) * (1.15 - 0.30 * L)
+    if dehaze:
+        # Atmospheric veil removal: deepens hazy shadows/midtones while keeping pure white clean
+        dL -= np.float32(dehaze * 0.30) * L * (1.0 - 0.72 * (L ** 2))
     if contrast:
         piv = np.float32(0.58)                                  # ~19 % linear mid-grey
         t = np.where(L <= piv, L/piv*0.5, 0.5 + (L - piv)/(1.0 - piv)*0.5)
@@ -142,6 +149,8 @@ def apply_tone_lin(lin, contrast: float = 0.0, highlights: float = 0.0, shadows:
     L_new = np.clip(L + dL, 0.0, 1.0)
     ratio = np.where(L > 1e-4, L_new/np.maximum(L, 1e-4), 1.0)
     c_scale = np.clip(ratio, 0.65, 1.20)
+    if dehaze:
+        c_scale = np.clip(c_scale * (1.0 + np.float32(dehaze * 0.38) * (1.0 - 0.55 * L_new)), 0.45, 1.55)
     hi_taper = np.where((L_new > L) & (L_new > 0.85),
                         np.clip((1.0 - L_new)/np.maximum(1.0 - L, 0.08), 0.0, 1.0)**0.35, 1.0)
     c_scale = (c_scale * hi_taper).astype(np.float32)

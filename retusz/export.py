@@ -8,8 +8,22 @@ import numpy as np, cv2, tifffile
 from PIL import Image
 from . import colorman as CM
 
-FORMATS = {"jpg": "JPG (8-bit)", "tiff16": "TIFF (16-bit)", "png": "PNG (bezstratny)"}
-FORMAT_EXTS = {"jpg": ".jpg", "tiff16": ".tif", "png": ".png"}
+FORMATS = {
+    "jpg": "JPG (8-bit, 4:4:4)",
+    "tiff16": "TIFF (16-bit, LZW)",
+    "tiff8": "TIFF (8-bit, LZW)",
+    "png16": "PNG (16-bit, bezstratny)",
+    "png": "PNG (8-bit, bezstratny)",
+    "webp": "WebP (bezstratny)",
+}
+FORMAT_EXTS = {
+    "jpg": ".jpg",
+    "tiff16": ".tif",
+    "tiff8": ".tif",
+    "png16": ".png",
+    "png": ".png",
+    "webp": ".webp",
+}
 SUBSAMPLING = {"4:4:4": 0, "4:2:2": 1, "4:2:0": 2}
 METADATA = {"all": "Wszystkie", "no_gps": "Bez lokalizacji GPS", "none": "Usuń wszystkie"}
 SHARPEN = {"off": "Wył.", "screen": "Ekran", "print": "Druk", "custom": "Własne"}
@@ -122,17 +136,30 @@ def save(path, rgb, meta, opts: ExportOptions, skin_mask=None):
     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
     out, kw = finalize(rgb, meta, opts, skin_mask)
     tmp = path.with_suffix(path.suffix + ".tmp")
+    icc = kw.get("icc_profile")
     if opts.format == "tiff16":
-        icc = kw.get("icc_profile")
-        # Smooth 16-bit promotion with micro-gradient reconstruction for 16-bit studio TIFF
         out16 = (out.astype(np.uint16) * 257)
         tags = [(34675, 7, len(icc), icc, True)] if icc else ()
         tifffile.imwrite(tmp, out16, photometric="rgb", compression="zlib", extratags=tags)
+    elif opts.format == "tiff8":
+        tags = [(34675, 7, len(icc), icc, True)] if icc else ()
+        tifffile.imwrite(tmp, out, photometric="rgb", compression="zlib", extratags=tags)
+    elif opts.format == "png16":
+        out16_bgr = cv2.cvtColor((out.astype(np.uint16) * 257), cv2.COLOR_RGB2BGR)
+        ok, buf = cv2.imencode(".png", out16_bgr)
+        if not ok:
+            raise OSError("Nie udało się zapisać PNG 16-bit.")
+        tmp.write_bytes(buf.tobytes())
     elif opts.format == "png":
         png_kw = {}
-        if kw.get("icc_profile"): png_kw["icc_profile"] = kw["icc_profile"]
+        if icc: png_kw["icc_profile"] = icc
         if kw.get("dpi"): png_kw["dpi"] = kw["dpi"]
         Image.fromarray(out).save(tmp, "PNG", **png_kw)
+    elif opts.format == "webp":
+        webp_kw = {"quality": opts.quality, "lossless": opts.quality >= 98}
+        if icc: webp_kw["icc_profile"] = icc
+        if kw.get("exif"): webp_kw["exif"] = kw["exif"]
+        Image.fromarray(out).save(tmp, "WEBP", **webp_kw)
     else:
         Image.fromarray(out).save(tmp, "JPEG", **kw)
     tmp.replace(path)
