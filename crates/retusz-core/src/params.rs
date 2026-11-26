@@ -73,11 +73,21 @@ pub struct Params {
     #[serde(default)]
     pub shadow_tone: f32,    // -1.0 .. +1.0 ('Ciepło cieni' OKLab Split Toning)
     #[serde(default)]
+    pub midtone_tone: f32,   // -1.0 .. +1.0 ('Barwa półtonów' OKLab 3-Way Color Grading)
+    #[serde(default)]
     pub highlight_tone: f32, // -1.0 .. +1.0 ('Blask świateł' OKLab Split Toning)
+    #[serde(default)]
+    pub grading_balance: f32,// -1.0 .. +1.0 ('Balans cieni/świateł')
     #[serde(default)]
     pub hsl_green: f32,      // -1.0 .. +1.0 ('Zieleń (Plener)' OKLCh HSL)
     #[serde(default)]
     pub hsl_blue: f32,       // -1.0 .. +1.0 ('Błękit (Niebo/Koszule)' OKLCh HSL)
+    #[serde(default)]
+    pub hsl_hue: [f32; 8],   // 8-channel OKLCh Hue (-1..1)
+    #[serde(default)]
+    pub hsl_sat: [f32; 8],   // 8-channel OKLCh Saturation (-1..1)
+    #[serde(default)]
+    pub hsl_lum: [f32; 8],   // 8-channel OKLCh Luminance (-1..1)
     #[serde(default)]
     pub vignette: f32,       // -1.0 .. +1.0
     #[serde(default = "default_dnb", alias = "dnb")]
@@ -106,6 +116,8 @@ pub struct Params {
     pub aspect: String,
     #[serde(default)]
     pub rating: u8,
+    #[serde(default)]
+    pub flag: i8,
     #[serde(default)]
     pub reference_path: Option<String>,
     #[serde(default)]
@@ -142,9 +154,14 @@ impl Default for Params {
             vibrance: 0.0,
             saturation: 0.0,
             shadow_tone: 0.0,
+            midtone_tone: 0.0,
             highlight_tone: 0.0,
+            grading_balance: 0.0,
             hsl_green: 0.0,
             hsl_blue: 0.0,
+            hsl_hue: [0.0; 8],
+            hsl_sat: [0.0; 8],
+            hsl_lum: [0.0; 8],
             vignette: 0.0,
             db: 0.40,
             plastic: 0.30,
@@ -159,6 +176,7 @@ impl Default for Params {
             crop: None,
             aspect: "orig".to_string(),
             rating: 0,
+            flag: 0,
             reference_path: None,
             ref_colorchecker: false,
         }

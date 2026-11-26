@@ -1,75 +1,71 @@
-# Retusz 0.8.0
+# Retusz 0.9.0
 
-Aplikacja na Windows: profesjonalny edytor portretowy z **autentycznym układem Adobe Lightroom Classic (1 kolumna szerokich suwaków, składana szuflada narzędzi, dolny pasek Loupe Toolbar)**, modułami **Biblioteka (G)** i **Edycja (D)**, jednoklikowym **`★ Auto Ton AI`**, **Color Gradingiem OKLab (`Ciepło cieni`, `Blask świateł`) i Selektywnym Mikserem HSL OKLCh (`Zieleń (Plener)`, `Błękit (Niebo/Biel)`)**, obróbką tonalną i barwną w przestrzeni OKLab
-(Ekspozycja EV, Kontrast, Jasność półtonów Capture One, Dehaze, Światła/Cienie, Biele/Czernie, Balans bieli Bradford CAT, Przejrzystość Fast LLF),
-kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**, obsługą **wielu wzorców kolorystycznych w jednej serii**, **importem wybranych zdjęć z folderu**,
-**dwuosiowym oświetleniem 3D (`Światło 3D: Poziom` oraz `Światło 3D: Pion`)**, **Separacją tła 3D (`bg_exposure`)**,
-**wizualną diagnostyką `Maska AI (M)` (maska skóry, obrys 3D, ramki twarzy w okularach i 5 punktów oczu/nosa/ust)**,
-zakładką **Detal i Ostrość** (4 tryby wyostrzania: Portret z ochroną skóry, Dekonwolucja RL obiektywu, Krawędzie Clamped USM, Miękki blask + Struktura i Odszumianie OKLab),
-biofizyczną optyką skóry (**Melanina/Hemoglobina**, **Redukcja połysku SUV De-Shine**, **Niedoskonałości Auto-Heal**, **Oczy i zęby**),
-**Wektorskopem Linii Skóry OKLCh (52°)** oraz oknem **Eksportuj jako… (TIFF/PNG 16-bit, WebP, JPG 4:4:4, ProPhoto RGB, Display P3, Adobe RGB, sRGB)**. Autor: Jack4B.
+Aplikacja na Windows: profesjonalny edytor portretowy z **minimalistycznym układem studyjnym Adobe Lightroom Classic (1 kolumna spokojnych, neutralnych suwaków, wyśrodkowany portret ze zwijanym paskiem serii `F6`, interaktywny Histogram ze strefami tonalnymi i kołowym Wektorskopem Skóry OKLCh 52°)**, modułami **Biblioteka (G)** i **Edycja (D)**, akceleracją **Intel iGPU OpenCV OpenCL (`cv2.ocl` / `UMat`) + DirectML**, **`★ Auto Ton AI v2` (kąt fototypu $\text{ITA}^\circ$ Chardon 1991)** i **`Auto WB v2` (Shades-of-Gray $p=6$)**, nieniszczącym pędzlem **`✦ Usuń / Popraw (Q)`** z transferem tekstury porów, **8-kanałowym Mikserem OKLCh HSL i 3-drożnym Color Gradingiem OKLab**, kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**, obsługą **wielu wzorców kolorystycznych w jednej serii**, ratowaniem **Światła mieszanego (LED / Błysk)**, dwuosiowym **Światłem 3D**, biofizyczną optyką skóry oraz oknem **Eksportuj jako… (TIFF/PNG 16-bit, WebP, JPG 4:4:4, ProPhoto RGB, Display P3, Adobe RGB, sRGB)**. Autor: Jack4B.
 
 ## Kontrola jakości
 
-`tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--colorchecker` sprawdza detekcję i kalibrację 24 pól ColorChecker (średnie ΔE₀₀ < 1,2, skóra < 1,0, szarości < 0,8).
+`tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D (próg szwu < 0,5 ΔL), identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--colorchecker` sprawdza detekcję i kalibrację 24 pól ColorChecker (średnie ΔE₀₀ < 1,2, skóra < 1,0, szarości < 0,8).
+
+### 0.9.0
+- **Przebudowa UI i ergonomii pracy (UX) według makiety studyjnej Lightroom Classic** (`retusz/gui/app.py`, `theme.py`, `histview.py`, `dialogs.py`):
+  - **Minimalistyczny pasek górny**: złote menu **`Otwórz ▾`**, lista **`Presety ▾`**, wyśrodkowany przełącznik modułów **`Biblioteka (G) | Edycja (D) | Porównaj | Grading z AI`**, ściąga skrótów **`?`** oraz przyciski **`Zapisz`** i **`Eksportuj…`**;
+  - **Spokojne, neutralne suwaki (`T.lr_slider`) i wyśrodkowane płótno portretu**: szare prowadnice ze srebrnym kołowym uchwytem eliminują wizualny hałas pomarańczowych pasków na wyzerowanych suwakach dwubiegunowych; lewy pasek miniatur serii jest zwijany przyciskiem **`▣`** (`F6`);
+  - **5 przejrzystych zakładek Develop**: `Podstawowe`, `Portret 3D`, `Kolor HSL`, `Detal`, `Wzorzec` z przyciskami szybkiego podglądu bez aktywnej zakładki (**`👁`**) oraz zerowania samej zakładki (**`↺`**);
+  - **4-stopniowa ergonomia sterowania i interaktywny Histogram**: kółko myszy nad suwakiem (`±2`, `Shift`: `±10`), płynny *scrubbing* po nazwie suwaka, kliknięcie wartości liczbowej do wpisania z klawiatury, dwuklik zerujący oraz **przeciąganie stref tonalnych bezpośrednio na Histogramie** (`Czernie | Cienie | Ekspozycja | Światła | Biele`);
+  - **Selektywne kopiowanie ustawień (`Kopiuj…`, `Ctrl+Shift+C`)** z wyborem grup parametrów (kadr domyślnie odznaczony) oraz **flagi selekcji Lightroom (`Wybrane ⚑` klawisz `P`, `Odrzucone ✕` klawisz `X`, `U`)**.
+- **Akceleracja zintegrowanych kart Intel iGPU (OpenCV OpenCL `cv2.ocl` / `UMat`) oraz optymalizacja DirectML** (`retusz/engine/device.py`, `settings.py`, `detail.py`, `cli.py`):
+  - nowy tryb **`Procesor + OpenCV OpenCL (Intel iGPU)`** (`--device ocl`), przyspieszający filtry rozmycia Gaussa i skalowanie na dużych kadrach (`≥ 0,4 Mpx`) na układach zintegrowanych Intel UHD / Iris Xe / Arc przez `cv2.UMat` z automatycznym fallbackiem CPU;
+  - konfiguracja sesji ONNX Runtime DirectML pod współdzieloną pamięć iGPU (`enable_mem_pattern=False`, `ORT_SEQUENTIAL`, dwukrotna rozgrzewka shaderów DX12 przed pomiarem czasu).
+- **`★ Auto Ton AI v2` z kątem fototypu karnacji $\text{ITA}^\circ$ (Chardon et al., 1991) oraz `Auto WB v2`** (`retusz/engine/tone.py`, `wb.py`):
+  - jawne rozdzielenie skali CIE $L^*$ (`0..100`) i OKLab $L$ (`0..1`) oraz dobór docelowej jasności skóry na podstawie kąta typologii indywidualnej $\text{ITA}^\circ = \arctan((L^* - 50)/b^*)$, dzięki czemu ciemne karnacje i portrety *low-key* nie są sztucznie rozjaśniane;
+  - jednoklikowy **`Auto WB`** oparty na algorytmie stałości barw *Shades-of-Gray* (norma Minkowskiego $p=6$, Finlayson & Trezzi 2004) z wykluczeniem wykrytych twarzy i pasma skóry (nie ochładza naturalnie ciepłej karnacji).
+- **Nieniszczący Pędzel `✦ Usuń / Popraw (Q)` z zachowaniem porów skóry** (`retusz/engine/skin_physics.py:apply_heal_strokes`):
+  - dwupasmowy retusz lokalny (inpainting Telea na paśmie niskich częstotliwości + transfer łatki wysokoczęstotliwościowej struktury porów i ziarna ze zdrowego otoczenia), zapisywany nieniszcząco w plikach bocznych `*.retusz.json` (`heal_strokes`).
+- **Pełny 8-kanałowy Mikser OKLCh HSL i 3-drożny Color Grading OKLab** (`retusz/engine/tone.py:apply_color_grading_oklab`):
+  - indywidualna regulacja **Nasycenia**, **Odcienia** i **Jasności** w 8 pasmach barwnych (`Czerwony`, `Pomarańcz`, `Żółty`, `Zielony`, `Turkus`, `Niebieski`, `Fiolet`, `Magenta`) oraz tonowanie **Cieni**, **Półtonów** i **Świateł** z suwakiem **Balans gradingu** i ochroną karnacji.
+- **Dwuetapowa weryfikacja anatomiczna twarzy YuNet i obsługa szerokich kadrów grupowych** (`retusz/engine/faces.py`):
+  - geometryczna i chromatyczna weryfikacja 5 punktów orientacyjnych (eliminacja fałszywych detekcji na tle/ubraniach) oraz skanowanie w zakładkowych kaflach z deduplikacją IoU dla szerokich zdjęć grupowych.
+- **Spójność licencyjna MIT i weryfikacja kryptograficzna SHA-256 modeli ONNX** (`LICENSE`, `THIRD_PARTY_LICENSES.md`, `pyproject.toml`, `Cargo.toml`).
 
 ### 0.8.0
-- **Autentyczny układ Adobe Lightroom Classic — 1 kolumna szerokich suwaków i zero szumu wizualnego** (`retusz/gui/app.py`):
-  - **Jedna pionowa kolumna suwaków w stylu Lightroom Classic**: zastąpiono dwukolumnową siatkę wąskich suwaków czytelnym układem `[Etykieta po lewej (128 px)] ─── [Szeroki suwak (176 px)] ─── [Wartość po prawej (52 px)]`;
-  - **Subtelny 3-pikselowy pasek gradientu wyłącznie pod suwakami barwnymi** (`Temperatura`, `Odcień`, `Odcień skóry`, `Ciepło cieni`, `Blask świateł`, `Zieleń`, `Błękit`) zamiast powtarzających się podpisów tekstowych pod każdym suwakiem;
-  - **Składana szuflada narzędzi lokalnych (`Pędzel D&B` | `Kadr`)**: domyślnie zwinięta pod paskiem narzędzi pod histogramem — otwiera się wyłącznie po aktywowaniu pędzla lub kadrowania (`C`) i zamyka przyciskiem `Gotowe ✕`, `Enter`, `Esc` lub po przełączeniu zakładki;
-  - **Dolny pasek narzędzi pod zdjęciem (Lightroom Loupe Toolbar `T`)**: tryby widoku (`Wynik | Przed | Po | Podział | Z wzorcem`), `Przed/Po (\)`, ocena gwiazdkowa `0..5★` oraz zoom (`Dopasuj`, `100%`, `%`) przeniesione bezpośrednio pod podgląd zdjęcia;
-  - **Dolna stopka prawego panelu (Lightroom Footer)**: `Cofnij | Ponów | Kopiuj | Wklej | Zeruj wszystko` oraz `Przywróć z serii | Ustaw jako serię`.
-- **`★ Auto Ton AI` — jednoklikowy balans ekspozycji i rozpiętości tonalnej pod twarz** (`retusz/engine/tone.py:auto_tone_params`):
-  - analizuje percentyle luminancji sceny ($P_1, P_{15}, P_{50}, P_{88}, P_{99}$) oraz jasność wykrytych twarzy w przestrzeni OKLab (celując w naturalną jasność skóry $L_{\text{OKLab}} \approx 0{,}72$ z ochroną przed przepaleniem świateł) i automatycznie ustawia `Ekspozycję`, `Kontrast`, `Światła`, `Cienie`, `Biele`, `Czernie` oraz `Jaskrawość`.
-- **Color Grading OKLab (Split Toning) i Selektywny Mikser HSL OKLCh z pełną izolacją skóry** (`retusz/engine/tone.py:apply_color_grading_oklab`):
-  - **`Ciepło cieni` (`shadow_tone`, `-100..+100`)**: chłodny kinowy błękit cieni ↔ miękki ciepły bursztyn cieni;
-  - **`Blask świateł` (`highlight_tone`, `-100..+100`)**: chłodne światła ↔ kremowy złoty blask świateł;
-  - **`Zieleń (Plener)` (`hsl_green`, `-100..+100`)**: zamienia jaskrawą zieleń trawy i liści w szlachetną, filmową zieleń lub ożywia roślinność przy 100% ochronie odcienia skóry ($50^\circ$ OKLCh);
-  - **`Błękit (Niebo/Biel)` (`hsl_blue`, `-100..+100`)**: usuwa niebieski/cyjanowy zafarb z białych koszul i sukni ślubnych lub pogłębia błękit nieba.
+- **Autentyczny układ Adobe Lightroom Classic — 1 kolumna szerokich suwaków i redukcja szumu wizualnego** (`retusz/gui/app.py`):
+  - **Jedna pionowa kolumna suwaków w stylu Lightroom Classic**: zastąpiono dwukolumnową siatkę wąskich suwaków czytelnym układem `[Etykieta po lewej] ─── [Szeroki suwak] ─── [Wartość po prawej]`;
+  - **Subtelny pasek gradientu wyłącznie pod suwakami barwnymi** zamiast powtarzających się podpisów tekstowych pod każdym suwakiem;
+  - **Składana szuflada narzędzi lokalnych**: domyślnie zwinięta pod paskiem narzędzi pod histogramem — otwiera się po aktywowaniu pędzla lub kadrowania (`C`) i zamyka przyciskiem `Gotowe ✕`, `Enter`, `Esc` lub po przełączeniu zakładki;
+  - **Dolny pasek narzędzi pod zdjęciem (Lightroom Loupe Toolbar `T`)**: tryby widoku (`Wynik | Przed | Po | Podział | Z wzorcem`), `Przed/Po (\)`, ocena gwiazdkowa `0..5★` oraz zoom (`Dopasuj`, `1:1`, `%`).
+- **`★ Auto Ton AI` — jednoklikowy balans ekspozycji i rozpiętości tonalnej pod twarz** (`retusz/engine/tone.py:auto_tone_params`).
+- **Color Grading OKLab (Split Toning) i Selektywny Mikser HSL OKLCh z izolacją skóry** (`retusz/engine/tone.py:apply_color_grading_oklab`):
+  - **`Ciepło cieni` (`shadow_tone`, `-100..+100`)**, **`Blask świateł` (`highlight_tone`, `-100..+100`)**, **`Zieleń (Plener)` (`hsl_green`)** oraz **`Błękit (Niebo/Biel)` (`hsl_blue`)** z ochroną pasma odcienia skóry ($50^\circ$ OKLCh).
 - **`Światło mieszane (LED / Błysk)` — ratowanie twarzy oświetlonej dwoma różnymi światłami (pół twarzy białej, pół czerwonej)** (`retusz/engine/skin_physics.py:mixed_light_gain`, `mixed_light_face_mask`):
-  - **anatomiczna maska twarzy odporna na skrajne zafarby (`mixed_light_face_mask`)**: wykorzystuje geometrię i 5 punktów anatomicznych YuNet oraz filtr prowadzący po strukturze luminancji, dzięki czemu obejmuje obie połówki twarzy nawet wtedy, gdy jedna połowa jest kredowobiała od flesza ($Cr \approx 128$), a druga intensywnie czerwona od LED-ów na sali ($Cr > 190$);
-  - **dwuźródłowa adaptacja chromatyczna w OKLab/OKLCh (`mixed_light_gain`, Hsu et al., SIGGRAPH 2008)**: estymuje wieloskalowe pole lokalnego oświetlenia na twarzy ($\sigma_1 = f_w/18$, $\sigma_2 = f_w/6$), sprowadza zarówno czerwoną, jak i białą połówkę twarzy do jednolitego, naturalnego odcienia skóry ($52^\circ$ OKLCh) oraz wyrównuje asymetrię jasności przy 100% zachowaniu tekstury porów;
-  - **`★ Auto Ton AI`** automatycznie wykrywa rozszczepione oświetlenie mieszane na twarzy i dobiera parametr `Światło mieszane (LED)`.
-- **Ulepszona detekcja wielu twarzy w okularach (`YuNet 0.45`)** (`retusz/engine/faces.py`):
-  - niezawodnie wykrywa drugie i kolejne twarze w parach/grupach nawet przy założonych grubych lub imprezowych okularach.
+  - **anatomiczna maska twarzy odporna na skrajne zafarby (`mixed_light_face_mask`)** oraz **dwuźródłowa adaptacja chromatyczna w OKLab/OKLCh (`mixed_light_gain`, Hsu et al., SIGGRAPH 2008)** z zachowaniem wysokoczęstotliwościowej tekstury porów.
+- **Ulepszona detekcja wielu twarzy w okularach (`YuNet`)** (`retusz/engine/faces.py`).
 
 ### 0.7.0
 - **Układ interfejsu w stylu Adobe Lightroom / Capture One Pro (`Prawy Dok Inspektora`)** (`retusz/gui/app.py`):
-  - **Odchudzony pasek górny (3 czytelne sekcje)**: *Pliki* (`Otwórz zdjęcie`, `Otwórz folder`, `Ustawienia`), *Moduły i Widok* (`Biblioteka (G)`, `Porównaj`, `Grading z AI`, `Wynik | Przed | Po | Podział | Z wzorcem`, `Dopasuj | 100% | Przed/Po`) oraz *Eksport* (`Zapisz`, `Eksportuj jako…`, `Eksportuj serię`);
-  - **Pełna wysokość pionowa dla portretów**: przeniesienie wszystkich suwaków, histogramu, wektorskopu skóry i narzędzi lokalnych (`Pędzel D&B`, `Kadr`) z dolnego paska do **Prawego Doku Inspektora** zwiększa pionową wysokość roboczą zdjęcia o ~40%;
-  - **Kolorowe podpowiedzi kierunkowe pod każdym suwakiem (`SLIDER_HINTS`) oraz panel `💡 Podpowiedź PRO` (`PRO_TIPS`)**: czytelne podpisy skrajnych kierunków w kolorach działania (np. `Odcień skóry: ◀ Róż / Czerwień ─── Złoty / Żółty ▶`, `Temperatura: ◀ Chłodny (Niebieski) ─── Ciepły (Bursztyn) ▶`, `Odcień: ◀ Zieleń ─── Magenta (Róż) ▶`).
+  - przeniesienie wszystkich suwaków, histogramu, wektorskopu skóry i narzędzi lokalnych z dolnego paska do **Prawego Doku Inspektora** zwiększa pionową wysokość roboczą zdjęcia o ~40%;
+  - podpowiedzi kierunkowe (`SLIDER_HINTS`) oraz panel podpowiedzi kontekstowych (`PRO_TIPS`).
 - **Dwuosiowe Światło 3D (`Lewo ↔ Prawo` oraz `Dół ↔ Góra`) i Separacja tła 3D (`bg_exposure`)** (`retusz/engine/relight.py`, `retusz/engine/pipeline.py`):
-  - **`Światło 3D: Lewo ↔ Prawo` (`light_x`)** oraz **`Światło 3D: Dół ↔ Góra` (`light_y`)**: fizyczne pozycjonowanie wirtualnego softboxa 3D na półsferze $(L_x, L_y, L_z)$ względem mapy normalnych powierzchni twarzy (z zachowaniem przełącznika `Auto 3D` i średniej ekspozycji postaci);
-  - **`Separacja tła 3D` (`bg_exposure`, `◀ Przyciemnij tło ↔ Rozjaśnij tło ▶`)**: selektywna zmiana ekspozycji tła w świetle liniowym ($\pm 0{,}75\text{ EV}$) na podstawie wygładzonej filtrem prowadzącym maski głębi 3D i maski skóry (twarz pozostaje w 100% chroniona, 0% halo).
-- **Wizualna diagnostyka pracy AI (`Maska AI (M)`) oraz import wybranych zdjęć z folderu** (`retusz/engine/histo.py`, `retusz/sidecar.py`, `retusz/gui/library.py`):
-  - **Przełącznik `Maska AI (M)`** pod histogramem i wektorskopem wyświetla na żywo bursztynową maskę roboczą skóry, turkusowy obrys separacji sylwetki 3D, ramki wykrytych twarzy (`AI Twarz #1`) oraz 5 punktów anatomicznych YuNet (oczy w kolorze szmaragdowym, czubek nosa w bursztynowym, kąciki ust w różowym);
-  - **Import wybranych zdjęć z folderu (`Series.from_selection`, `Otwórz zdjęcie` z wyborem wielokrotnym `Ctrl/Shift` oraz `+ Dodaj zdjęcia…` w Bibliotece)**: pozwala otworzyć lub dołączyć do serii tylko wybrane zdjęcia z dużego folderu.
+  - pozycjonowanie wirtualnego softboxa 3D na półsferze $(L_x, L_y, L_z)$ względem mapy normalnych powierzchni twarzy;
+  - selektywna zmiana ekspozycji tła w świetle liniowym ($\pm 0{,}75\text{ EV}$) na podstawie wygładzonej filtrem prowadzącym maski głębi 3D i maski skóry (ochrona twarzy i miękkie przejście na krawędziach).
+- **Wizualna diagnostyka pracy AI (`Maska AI (M)`) oraz import wybranych zdjęć z folderu** (`retusz/engine/histo.py`, `retusz/sidecar.py`, `retusz/gui/library.py`).
 
 ### 0.6.0
 - **Moduły `Biblioteka (G)` i `Edycja (D)` w stylu Lightroom / Capture One** (`retusz/gui/library.py`, `retusz/gui/app.py`):
-  - **Biblioteka (`G`)**: widok siatki miniatur serii (Contact Sheet) z filtrowaniem (`Wszystkie`, `Wybrane ★`, `Edytowane ●`), oceną gwiazdkową `1–5 ★`, znacznikiem aktywnego wzorca na każdej karcie, wielokrotnym zaznaczaniem do grupowego przypisywania wzorców lub presetów oraz przejściem do **Edycji (`D`)**;
-  - **Wiele wzorców kolorystycznych w jednej serii (`reference_path`, `reference_bank`)** (`retusz/sidecar.py`, `retusz/batch.py`): każde zdjęcie w serii może używać domyślnego wzorca serii, własnego indywidualnego wzorca kolorystycznego / tablicy ColorChecker 24 albo być edytowane całkowicie samodzielnie (`Samodzielne (brak)`).
-- **Zakładka `Detal i Ostrość` oraz parametry klasy Capture One / Lightroom** (`retusz/engine/detail.py`, `retusz/engine/tone.py`):
-  - **4 tryby wyostrzania na żywo (`sharpen_mode` + `Ostrość`)**:
-    1. *Portret (ochrona skóry)* — morfologiczny Clamped USM (0% halo) z automatycznym tłumieniem wyostrzania porów na gładkiej skórze,
-    2. *Dekonwolucja RL (obiektyw)* — 3-iteracyjna tłumiona dekonwolucja Richardsona-Lucy'ego odzyskująca ostrość dyfrakcyjną obiektywu bez obwódek USM,
-    3. *Krawędzie (Clamped USM)* — pełnokadrowy USM bez halo,
-    4. *Miękki blask (Soft Focus)* — optyczna dyfuzja portretowa;
-  - **Struktura (`texture`)** (mikrodetal wysokich częstotliwości), **Odszumianie (`denoise`)** (dwupasmowe odszumianie chrominancji OKLab i szumu luminancji w cieniach), **Jasność / Półtony (`brightness`)** (krzywa półtonów Capture One w OKLab $L$ z zamrożonym punktem czerni i bieli) oraz **Zamglenie (`dehaze`)** (usuwanie mgiełki atmosferycznej i flary pod światło).
-- **Okno `Eksportuj jako… (Ctrl+Shift+E)` — 6 formatów i 5 przestrzeni barwnych ICC** (`retusz/export.py`, `retusz/colorman.py`, `retusz/gui/dialogs.py`):
-  - wybór zakresu (`Bieżące zdjęcie`, `Wybrane zdjęcia ★`, `Cała seria`),
-  - **6 formatów**: `JPG (8-bit, 4:4:4)`, `TIFF (16-bit, LZW)`, `TIFF (8-bit, LZW)`, `PNG (16-bit, bezstratny)`, `PNG (8-bit, bezstratny)`, `WebP (bezstratny)`,
-  - **5 przestrzeni barwnych ICC**: `Jak oryginał`, `sRGB`, `Display P3`, `Adobe RGB (1998)`, `ProPhoto RGB (ROMM)`.
+  - **Biblioteka (`G`)**: widok siatki miniatur serii (Contact Sheet) z filtrowaniem, oceną gwiazdkową `1–5 ★`, wielokrotnym zaznaczaniem do grupowego przypisywania wzorców lub presetów oraz przejściem do **Edycji (`D`)**;
+  - **Wiele wzorców kolorystycznych w jednej serii (`reference_path`, `reference_bank`)** (`retusz/sidecar.py`, `retusz/batch.py`).
+- **Zakładka `Detal` oraz parametry klasy Capture One / Lightroom** (`retusz/engine/detail.py`, `retusz/engine/tone.py`):
+  - **4 tryby wyostrzania na żywo (`sharpen_mode` + `Ostrość`)**: *Portret (ochrona skóry — morfologiczny Clamped USM ograniczający obwódki)*, *Dekonwolucja RL (obiektyw)*, *Krawędzie (Clamped USM)*, *Miękki blask (Soft Focus)*;
+  - **Struktura (`texture`)**, **Odszumianie (`denoise`)**, **Jasność / Półtony (`brightness`)** oraz **Zamglenie (`dehaze`)**.
+- **Okno `Eksportuj jako… (Ctrl+Shift+E)` — 6 formatów i 5 przestrzeni barwnych ICC** (`retusz/export.py`, `retusz/colorman.py`, `retusz/gui/dialogs.py`).
 
 ### 0.5.0
 - **Biofizyczna optyka skóry, dychromatyczny De-Shine SUV, Fast LLF i Wektorskop OKLCh** (`retusz/engine/skin_physics.py`, `retusz/engine/llf.py`, `crates/retusz-core/src/skin_physics.rs`):
-  - **Redukcja połysku (`deshine`, 0–100%)**: dychromatyczna separacja połysku w przestrzeni SUV (Mallick et al. 2005; Yang, Wang & Ahuja 2010) usuwa białe, tłuste odblaski z czoła, grzbietu nosa i policzków, odzyskując podpowierzchniową barwę skóry i zachowując 100% porów;
-  - **Separacja chromoforów Melanina / Hemoglobina** w dziedzinie gęstości optycznej $-\log_{10}(I_{\text{lin}})$ (Tsumura et al., SIGGRAPH 2003): wyrównywanie rumienia i zaczerwienień bez płaskiego rozmycia złocistego odcienia melaniny;
-  - **Niedoskonałości (`blemish`, 0–100%)**: dwupasmowy Auto-Heal w kanonicznej skali twarzy (`256 px` — zgodność podglądu i eksportu ΔE < 1) wykrywa punktowe wypryski wewnątrz bezpiecznej maski skóry, leczy wyłącznie pasmo bazowe i zachowuje pasmo wysokich częstotliwości (pory skóry);
-  - **Oczy i zęby (`eyes_teeth`, 0–100%)**: anatomicznie maskowane z 5 punktów YuNet podbicie mikrokontrastu i blasku tęczówki (z ochroną źrenicy i blików catchlight), redukcja zaczerwienienia białek oczu oraz naturalne zmniejszenie żółtego zafarbu zębów;
-  - **Szybka Lokalna Piramida Laplace'a (`Fast Local Laplacian Filter`, Aubry et al., ACM TOG 2014)** dla suwaka **Przejrzystość**: wieloskalowy mikrokontrast matematycznie wolny od efektu halo na krawędziach o wysokim kontraście (oprawki okularów, sylwetka);
-  - **Wektorskop Linii Skóry OKLCh (52°)** zintegrowany obok histogramu w prawym panelu oraz nowy tryb widoku **`Podział`** (interaktywna pionowa kurtyna Przed | Po przesuwana myszą na głównym płótnie).
+  - **Redukcja połysku (`deshine`, 0–100%)**: dychromatyczna separacja połysku w przestrzeni SUV (Mallick et al. 2005; Yang, Wang & Ahuja 2010) usuwa tłuste odblaski z czoła, nosa i policzków, odzyskując barwę podpowierzchniową z zachowaniem pasma wysokich częstotliwości porów;
+  - **Separacja chromoforów Melanina / Hemoglobina** w dziedzinie gęstości optycznej $-\log_{10}(I_{\text{lin}})$ (Tsumura et al., SIGGRAPH 2003);
+  - **Niedoskonałości (`blemish`, 0–100%)**: dwupasmowy Auto-Heal w kanonicznej skali twarzy (`256 px` — zgodność podglądu i eksportu ΔE < 1);
+  - **Oczy i zęby (`eyes_teeth`, 0–100%)**: anatomicznie maskowane z 5 punktów YuNet podbicie mikrokontrastu tęczówki, oczyszczenie białek oczu oraz zmniejszenie żółtego zafarbu zębów;
+  - **Szybka Lokalna Piramida Laplace'a (`Fast Local Laplacian Filter`, Aubry et al., ACM TOG 2014)** dla suwaka **Przejrzystość** (wieloskalowy kontrast lokalny ograniczający efekt halo na krawędziach o wysokim kontraście);
+  - **Wektorskop Linii Skóry OKLCh (52°)** oraz interaktywny tryb widoku **`Podział`**.
 
 ### 0.4.0
 - **Jakość studyjna potoku obrazu (RAW / Soft-Knee / Linear Downsizing / Halo-Free USM / 16-bit TIFF)**:
@@ -225,8 +221,7 @@ ale bez EXIF.
 - **Model AI** (ModFlows B6, 119 MB) pobierany przy pierwszym starcie z wydania
   [models-v1](https://github.com/Jack4B/retusz/releases/tag/models-v1); do tego czasu działa lekki model B0 (18 MB, wbudowany).
   Bez modeli działa tryb „Bez AI (IDT)”.
-- **Obliczenia AI**: Automatycznie (jednorazowy test: karta graficzna przez DirectML albo procesor, wybiera szybsze),
-  albo na stałe CPU / GPU. Na zintegrowanych kartach Intel procesor bywa 2× szybszy.
+- **Obliczenia AI i OpenCV OpenCL (Intel iGPU / GPU)**: Automatycznie (benchmark DirectML vs CPU z rozgrzewką shaderów DX12 + automatyczna aktywacja OpenCV OpenCL `cv2.UMat`), `Procesor + OpenCV OpenCL (Intel iGPU)` (`--device ocl`, idealny dla zintegrowanych kart Intel UHD / Iris Xe / Arc), `Karta graficzna (DirectML GPU)` albo `Tylko procesor (CPU)`.
 
 ![Ustawienia](docs/screenshots/05_ustawienia_ogolne.png) ![Eksport](docs/screenshots/06_ustawienia_eksport.png)
 
@@ -236,22 +231,22 @@ py -3.11 -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python -m retusz                      & rem okno
 .venv\Scripts\python -m retusz D:\Sesja --reference D:\Sesja\wzorzec.jpg
-.venv\Scripts\python -m retusz cli D:\Sesja --reference D:\Sesja\wzorzec.jpg --long-edge 2048 --suffix _web
+.venv\Scripts\python -m retusz cli D:\Sesja --reference D:\Sesja\wzorzec.jpg --device ocl --long-edge 2048 --suffix _web
 ```
-Budowanie `.exe`: zobacz [BUILD.md](BUILD.md). Gotowa paczka Windows: zakładka *Releases* albo artefakt z GitHub Actions.
+Budowanie `.exe`: zobacz [BUILD.md](BUILD.md). Gotowy instalator `Retusz-Setup-x64.exe` i paczka portable `Retusz-windows-x64.zip`: zakładka *Releases* albo artefakt z GitHub Actions.
 
 ## Czasy (zdjęcie 24 Mpx, eksport z wyostrzaniem)
 | Komputer | Na zdjęcie |
 |---|---|
 | procesor 8 rdzeni (serwer, bez GPU) | ~2,7 s |
-| i7-7700 + Intel HD 630 (Windows 10, CPU) | zobacz BUILD.md |
+| i7-7700 + Intel HD 630 (Windows 10, CPU / OpenCL iGPU) | zobacz BUILD.md |
 Pierwsze zdjęcie po instalacji: +kilka sekund na jednorazową kompilację (potem z pamięci podręcznej).
 
 ## Dane użytkownika
-`%LOCALAPPDATA%\Retusz\` — `settings.json`, `device.json` (wybór CPU/GPU), `models\modflows_b6_fp16.onnx`, `numba-cache\`.
+`%LOCALAPPDATA%\Retusz\` — `settings.json`, `device.json` (wybór CPU/OpenCL/GPU), `models\modflows_b6_fp16.onnx`, `numba-cache\`.
 
 ## Testy
-`python -m pytest -q`
+`python -m pytest -q` · `cargo test --workspace --release`
 
 ## Licencja
-Kod: © Jack4B, wszelkie prawa zastrzeżone (repozytorium jest publiczne do wglądu). Komponenty i modele: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+Kod źródłowy: licencja **MIT** (© 2026 Jack4B, zobacz [LICENSE](LICENSE)). Komponenty zewnętrzne i sumy SHA-256 modeli ONNX: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

@@ -6,28 +6,129 @@ from .color import small, guided_refine_rgb
 
 _det = None; _lock = threading.Lock()
 
-def detect(rgb, score=0.45, landmarks=False):
-    """Faces as [x, y, w, h] in rgb pixel coordinates; with landmarks=True also a 5x2 array per face
-    (YuNet rows 4..13: right eye, left eye, nose tip, mouth right, mouth left), as (faces, lms)."""
+def verify_face_landmarks(rgb: np.ndarray, box: np.ndarray, lm: np.ndarray) -> bool:
+    """Two-stage anatomical landmark & core luminance plausibility check for low-threshold YuNet candidates:
+    rejects false positives on background patterns/posters while keeping real faces wearing thick/novelty glasses."""
+    x, y, w, h = (float(v) for v in box[:4])
+    if w < 10.0 or h < 10.0 or lm is None or len(lm) < 5:
+        return False
+    pts = np.asarray(lm, np.float32).reshape(5, 2)
+    e_r, e_l, nose, m_r, m_l = pts
+    # Inter-ocular distance & roll angle check
+    dx_e = float(abs(e_l[0] - e_r[0]))
+    dy_e = float(abs(e_l[1] - e_r[1]))
+    d_eyes = float(np.hypot(dx_e, dy_e))
+    if not (0.14 * w <= d_eyes <= 0.72 * w):
+        return False
+    if dy_e / max(dx_e, 1e-3) > 0.72:
+        return False
+    e_mid_y = 0.5 * float(e_r[1] + e_l[1])
+    m_mid_y = 0.5 * float(m_r[1] + m_l[1])
+    if m_mid_y <= e_mid_y + 0.10 * h:
+        return False
+    if not (e_mid_y - 0.08 * h <= float(nose[1]) <= m_mid_y + 0.04 * h):
+        return False
+    # Check face core isn't pure black/blown-out solid patch
+    H, W = rgb.shape[:2]
+    x0, x1 = max(0, int(x + 0.2 * w)), min(W, int(x + 0.8 * w))
+    y0, y1 = max(0, int(y + 0.2 * h)), min(H, int(y + 0.8 * h))
+    if x1 <= x0 + 2 or y1 <= y0 + 2:
+        return False
+    core_lum = float(rgb[y0:y1, x0:x1].mean())
+    return 14.0 <= core_lum <= 249.0
+
+
+def nms_boxes_iou(boxes: list, lms: list, scores: list | None = None, iou_thr: float = 0.42):
+    """Cross-tile / multi-scale greedy IoU deduplication (YuNet already applies single-scale NMS internally)."""
+    if not boxes:
+        return [], []
+    n = len(boxes)
+    sc = [float(scores[i]) if scores is not None and i < len(scores) else 1.0 for i in range(n)]
+    order = sorted(range(n), key=lambda i: (sc[i], float(boxes[i][2] * boxes[i][3])), reverse=True)
+    kept_b, kept_l = [], []
+    for i in order:
+        bx = boxes[i]
+        x1, y1, w1, h1 = (float(v) for v in bx[:4])
+        a1 = max(1.0, w1 * h1)
+        dup = False
+        for kb in kept_b:
+            x2, y2, w2, h2 = (float(v) for v in kb[:4])
+            ix0, iy0 = max(x1, x2), max(y1, y2)
+            ix1, iy1 = min(x1 + w1, x2 + w2), min(y1 + h1, y2 + h2)
+            iw, ih = max(0.0, ix1 - ix0), max(0.0, iy1 - iy0)
+            inter = iw * ih
+            union = a1 + max(1.0, w2 * h2) - inter
+            if inter / max(union, 1e-6) >= iou_thr:
+                dup = True
+                break
+        if not dup:
+            kept_b.append(bx)
+            kept_l.append(lms[i] if i < len(lms) else None)
+    return kept_b, kept_l
+
+
+def _detect_raw(bgr_img: np.ndarray, score: float):
     global _det
-    sm = small(rgb, 1280); h, w = sm.shape[:2]
+    h, w = bgr_img.shape[:2]
     with _lock:
         if _det is None:
             _det = cv2.FaceDetectorYN.create(str(bundled_model("face_detection_yunet_2023mar.onnx")), "", (w, h), score)
         _det.setScoreThreshold(float(score))
-        _det.setInputSize((w, h)); _, f = _det.detect(cv2.cvtColor(sm, cv2.COLOR_RGB2BGR))
-    s = rgb.shape[1]/w
-    boxes = [] if f is None else [np.asarray(x[:4]*s, np.float32) for x in f]
-    if not landmarks: return boxes
-    return boxes, ([] if f is None else [np.asarray(x[4:14]*s, np.float32).reshape(5, 2) for x in f])
+        _det.setInputSize((w, h))
+        _, f = _det.detect(bgr_img)
+    return f
+
+
+def detect(rgb, score=0.45, landmarks=False):
+    """Faces as [x, y, w, h] in rgb pixel coordinates; with landmarks=True also a 5x2 array per face.
+    Uses two-stage landmark verification for candidates in [0.45, 0.68) and overlapping horizontal tile scan
+    on wide/high-res group shots so smaller faces in couples/groups are reliably detected."""
+    sm = small(rgb, 1280); h, w = sm.shape[:2]
+    bgr = cv2.cvtColor(sm, cv2.COLOR_RGB2BGR)
+    f = _detect_raw(bgr, score)
+    s = rgb.shape[1] / w
+
+    boxes, lms, scs = [], [], []
+    if f is not None:
+        for row in f:
+            bx = np.asarray(row[:4] * s, np.float32)
+            lm = np.asarray(row[4:14] * s, np.float32).reshape(5, 2)
+            conf = float(row[14]) if len(row) > 14 else 1.0
+            if conf >= 0.68 or verify_face_landmarks(rgb, bx, lm):
+                boxes.append(bx); lms.append(lm); scs.append(conf)
+
+    # Tiled pass for wide/large group shots when full-frame pass found <= 1 small face
+    H, W = rgb.shape[:2]
+    if max(H, W) >= 1800 and W >= H and (not boxes or max(b[2] for b in boxes) < 0.14 * W):
+        tw = int(round(0.62 * W))
+        for x_off in (0, W - tw):
+            crop = rgb[:, x_off:x_off + tw]
+            c_sm = small(crop, 960); ch, cw = c_sm.shape[:2]
+            cs = crop.shape[1] / cw
+            cf = _detect_raw(cv2.cvtColor(c_sm, cv2.COLOR_RGB2BGR), max(score, 0.50))
+            if cf is not None:
+                for row in cf:
+                    bx = np.asarray(row[:4] * cs, np.float32); bx[0] += x_off
+                    lm = np.asarray(row[4:14] * cs, np.float32).reshape(5, 2); lm[:, 0] += x_off
+                    conf = float(row[14]) if len(row) > 14 else 1.0
+                    if conf >= 0.68 or verify_face_landmarks(rgb, bx, lm):
+                        boxes.append(bx); lms.append(lm); scs.append(conf)
+        boxes, lms = nms_boxes_iou(boxes, lms, scs, iou_thr=0.42)
+
+    if not landmarks:
+        return boxes
+    return boxes, lms
+
 
 def pick_faces(rgb, landmarks=False):
     """Main subjects only: drop faces narrower than 0.45x the widest (posters, distant background people),
     keeping secondary couple/group faces even when partially occluded by glasses or hats.
     landmarks=True returns (faces, lms) with the matching 5x2 landmark arrays."""
     f, l = detect(rgb, landmarks=True)
-    if not f: return ([], []) if landmarks else []
-    mw = max(x[2] for x in f); keep = [i for i, x in enumerate(f) if x[2] >= 0.45*mw]
+    if not f:
+        return ([], []) if landmarks else []
+    mw = max(x[2] for x in f)
+    keep = [i for i, x in enumerate(f) if x[2] >= 0.45 * mw]
     fs = [f[i] for i in keep]
     return (fs, [l[i] for i in keep]) if landmarks else fs
 

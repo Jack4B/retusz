@@ -7,7 +7,8 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 onefile = os.environ.get("RETUSZ_ONEFILE") == "1"
 datas = [("retusz/assets", "retusz/assets"), ("retusz/engine/render.py", "retusz/engine"),
-         ("retusz/engine/bgu.py", "retusz/engine")]  # source needed for the numba disk cache
+         ("retusz/engine/bgu.py", "retusz/engine"),
+         ("LICENSE", "."), ("THIRD_PARTY_LICENSES.md", ".")]  # source needed for numba cache + binary attribution
 datas += collect_data_files("customtkinter")
 binaries = collect_dynamic_libs("onnxruntime") + collect_dynamic_libs("rawpy")
 hidden = ["PIL._tkinter_finder", "numba", "llvmlite", "onnxruntime", "rawpy", "rawpy._rawpy", "tifffile",

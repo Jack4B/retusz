@@ -21,11 +21,16 @@ def main(argv=None):
     ap.add_argument("--preset", "-p", default=None, help="nazwa presetu do nałożenia na serię")
     ap.add_argument("--out"); ap.add_argument("--quality", type=int, default=95)
     ap.add_argument("--method", choices=list(models.METHODS), default="ai")
+    ap.add_argument("--device", choices=["auto", "gpu", "ocl", "cpu"], default=None, help="urządzenie: auto | gpu (DirectML) | ocl (OpenCV OpenCL iGPU) | cpu")
     ap.add_argument("--long-edge", type=int, default=0); ap.add_argument("--suffix", default="")
     ap.add_argument("--format", choices=list(export.FORMATS), default="jpg")
     ap.add_argument("--profile", choices=list(export.CM.OUTPUT_PROFILES), default="keep")
     ap.add_argument("--sharpen", choices=list(export.SHARPEN), default="screen")
     a = ap.parse_args(argv)
+    from .settings import Settings
+    from .engine import device as DEV
+    dev_mode = a.device or Settings.load().device
+    DEV.MODE = dev_mode; DEV.ocl_configure(dev_mode)
     path = Path(a.path)
     ref_p = Path(a.colorchecker) if a.colorchecker else (Path(a.reference) if a.reference else None)
     is_cc = bool(a.colorchecker)

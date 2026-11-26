@@ -34,7 +34,7 @@ class LibraryView(ctk.CTkFrame):
         self.mod_switch.pack(side="left")
 
         self.filter_seg = T.segmented(
-            bar, ["Wszystkie", "Wybrane ★", "Własny wzorzec ♦", "Edytowane ●"], command=self._on_filter
+            bar, ["Wszystkie", "Flaga ⚑", "Wybrane ★", "Własny wzorzec ♦", "Odrzucone ✕"], command=self._on_filter
         )
         self.filter_seg.set("Wszystkie")
         self.filter_seg.pack(side="left", padx=10)
@@ -64,13 +64,13 @@ class LibraryView(ctk.CTkFrame):
         b_os = T.button(f_act, "Wybierz pliki…", self.app.open_photo, width=100)
         b_os.configure(height=25, font=T.font(11)); b_os.pack(side="right")
 
-        self.folder_scroll = ctk.CTkScrollableFrame(left, fg_color=T.PANEL, corner_radius=8, height=280)
+        self.folder_scroll = ctk.CTkScrollableFrame(left, fg_color=T.PANEL, corner_radius=8, height=250)
         self.folder_scroll.pack(fill="x", padx=10, pady=(0, 10))
 
         T.label(left, "▸ Kolekcje Smart", 13, weight="bold").pack(anchor="w", padx=12, pady=(4, 4))
-        for col_name in ("Wszystkie", "Wybrane ★", "Własny wzorzec ♦", "Edytowane ●"):
+        for col_name in ("Wszystkie", "Flaga ⚑", "Wybrane ★", "Własny wzorzec ♦", "Edytowane ●", "Odrzucone ✕"):
             cb = T.button(left, col_name, lambda c=col_name: self._set_collection(c), width=204)
-            cb.configure(height=26, font=T.font(11))
+            cb.configure(height=25, font=T.font(11))
             cb.pack(padx=10, pady=2)
 
         # ---- Center Pane: Scrollable Contact-Sheet Grid (3 columns) ----
@@ -168,12 +168,17 @@ class LibraryView(ctk.CTkFrame):
         out = []
         ser = self.app.series
         for i, p in enumerate(self.app.photos):
-            if self.filter_mode.startswith("Wybrane"):
-                pr = ser.params_for(p) if ser else None
+            pr = ser.params_for(p) if ser else None
+            if self.filter_mode.startswith("Flaga"):
+                if not pr or getattr(pr, "flag", 0) < 1:
+                    continue
+            elif self.filter_mode.startswith("Odrzucone"):
+                if not pr or getattr(pr, "flag", 0) >= 0:
+                    continue
+            elif self.filter_mode.startswith("Wybrane"):
                 if not pr or pr.rating < 1:
                     continue
             elif self.filter_mode.startswith("Własny wzorzec"):
-                pr = ser.params_for(p) if ser else None
                 if not pr or not pr.reference_path or pr.reference_path == "__none__":
                     continue
             elif self.filter_mode.startswith("Edytowane"):
@@ -181,6 +186,20 @@ class LibraryView(ctk.CTkFrame):
                     continue
             out.append(i)
         return out
+
+    def toggle_photo_flag(self, idx: int):
+        if not self.app.series or not (0 <= idx < len(self.app.photos)):
+            return
+        ph = self.app.photos[idx]
+        p = self.app.series.params_for(ph)
+        cur = getattr(p, "flag", 0)
+        nxt = 1 if cur == 0 else (-1 if cur == 1 else 0)
+        p.flag = nxt
+        self.app.series.set_override(ph, p)
+        if idx == self.app.idx:
+            self.app.params.flag = nxt
+            self.app._update_flag_btns(nxt)
+        self.refresh()
 
     def toggle_select(self, idx: int):
         if idx in self.selected:
@@ -395,10 +414,13 @@ class LibraryView(ctk.CTkFrame):
             )
             tbtn.pack(padx=8, pady=(8, 4), fill="x")
 
-            # Filename + Edited dot
+            # Filename + Flag + Edited dot
             edited = ser.has_override(ph) if ser else False
-            name_txt = ("● " if edited else "") + (ph.name if len(ph.name) <= 24 else ph.name[:21] + "…")
-            T.label(card, name_txt, 12, T.ACCENT if edited else T.TEXT, weight="bold").pack(anchor="w", padx=8)
+            fl = getattr(p, "flag", 0)
+            fl_prefix = "⚑ " if fl > 0 else ("✕ " if fl < 0 else "")
+            name_txt = fl_prefix + ("● " if edited else "") + (ph.name if len(ph.name) <= 22 else ph.name[:19] + "…")
+            name_col = "#72CF88" if fl > 0 else ("#E06868" if fl < 0 else (T.ACCENT if edited else T.TEXT))
+            T.label(card, name_txt, 12, name_col, weight="bold").pack(anchor="w", padx=8)
 
             # Reference badge (highlighted in warm amber when photo has its own reference)
             has_own_ref = bool(p.reference_path and p.reference_path != "__none__")
@@ -413,18 +435,24 @@ class LibraryView(ctk.CTkFrame):
                 ref_txt = "Tryb: Samodzielny edytor"
             T.label(card, ref_txt, 11, T.ACCENT if has_own_ref else T.MUTED).pack(anchor="w", padx=8, pady=(1, 4))
 
-            # Bottom row: Stars + 1-Click Per-Photo Reference button ('♦ Wzorzec…') + Edit button
+            # Bottom row: Flag + Stars + 1-Click Per-Photo Reference button ('♦ Wzorzec…') + Edit button
             bot = ctk.CTkFrame(card, fg_color=T.CARD)
             bot.pack(fill="x", padx=8, pady=(0, 8))
+            fl_btn = T.button(bot, "⚑" if fl >= 0 else "✕", lambda idx=i: self.toggle_photo_flag(idx), width=26)
+            fl_btn.configure(height=24, font=T.font(11),
+                             border_color="#72CF88" if fl > 0 else ("#E06868" if fl < 0 else T.BORDER),
+                             text_color="#72CF88" if fl > 0 else ("#E06868" if fl < 0 else T.MUTED))
+            fl_btn.pack(side="left", padx=(0, 3))
+
             stars_txt = "★" * p.rating + "☆" * (5 - p.rating)
-            s_btn = T.button(bot, stars_txt, lambda idx=i, cur=p.rating: self.set_photo_rating(idx, (cur + 1) % 6), width=64)
+            s_btn = T.button(bot, stars_txt, lambda idx=i, cur=p.rating: self.set_photo_rating(idx, (cur + 1) % 6), width=58)
             s_btn.configure(height=24, font=T.font(10), text_color=T.ACCENT if p.rating > 0 else T.MUTED)
             s_btn.pack(side="left")
 
-            e_btn = T.button(bot, "Edytuj (D)", lambda idx=i: self.open_in_develop(idx), accent=(i == self.app.idx), width=68)
+            e_btn = T.button(bot, "Edytuj (D)", lambda idx=i: self.open_in_develop(idx), accent=(i == self.app.idx), width=64)
             e_btn.configure(height=24, font=T.font(10))
             e_btn.pack(side="right")
 
-            r_btn = T.button(bot, "♦ Wzorzec…", lambda idx=i: self.assign_ref_for_single_photo(idx), width=74)
+            r_btn = T.button(bot, "♦ Wzorzec…", lambda idx=i: self.assign_ref_for_single_photo(idx), width=68)
             r_btn.configure(height=24, font=T.font(10))
-            r_btn.pack(side="right", padx=3)
+            r_btn.pack(side="right", padx=2)

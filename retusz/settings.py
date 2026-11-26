@@ -5,7 +5,12 @@ from dataclasses import dataclass, asdict, fields, field
 from .paths import data_dir
 from .export import ExportOptions
 
-DEVICES = {"auto": "Automatycznie (test szybkości)", "cpu": "Procesor (CPU)", "gpu": "Karta graficzna (DirectML)"}
+DEVICES = {
+    "auto": "Automatycznie (DirectML + OpenCL)",
+    "gpu": "Karta graficzna / iGPU (DirectML + OpenCL)",
+    "ocl": "Procesor + OpenCV OpenCL (Intel iGPU)",
+    "cpu": "Tylko procesor (CPU)",
+}
 
 @dataclass
 class Settings:

@@ -45,9 +45,14 @@ class Params:
     saturation: float = 0.0         # 'Nasycenie' -1..1
     vibrance: float = 0.0           # 'Jaskrawość' -1..1 (OKLab, boosts dull colours, spares skin)
     shadow_tone: float = 0.0        # 'Ciepło cieni' -1..1 (OKLab Split Toning: cool blue <-> warm amber shadows)
+    midtone_tone: float = 0.0       # 'Barwa półtonów' -1..1 (OKLab 3-Way Color Grading midtone tint)
     highlight_tone: float = 0.0     # 'Blask świateł' -1..1 (OKLab Split Toning: cool <-> golden hour highlights)
+    grading_balance: float = 0.0    # 'Balans cieni/świateł' -1..1 (Color Grading shadow/highlight crossover pivot)
     hsl_green: float = 0.0          # 'Zieleń (Plener)' -1..1 (OKLCh selective foliage green control, spares skin)
     hsl_blue: float = 0.0           # 'Błękit (Niebo/Koszule)' -1..1 (OKLCh selective blue cast/sky control, spares skin)
+    hsl_hue: list = field(default_factory=lambda: [0.0] * 8)  # 8-channel OKLCh Hue shifts (-1..1)
+    hsl_sat: list = field(default_factory=lambda: [0.0] * 8)  # 8-channel OKLCh Saturation shifts (-1..1)
+    hsl_lum: list = field(default_factory=lambda: [0.0] * 8)  # 8-channel OKLCh Luminance shifts (-1..1)
     skin_even: float = 0.3          # 'Równanie skóry' 0..1 (chromophore hemoglobin/melanin + mixed-light evening)
     mixed_light: float = 0.0        # 'Światło mieszane (LED)' 0..1 (Dual-illuminant split-face white/red unification in OKLab)
     skin_cast: float = 0.0          # 'Czysta skóra' 0..1 (OKLCh skin-locus cast reduction)
@@ -63,8 +68,10 @@ class Params:
     angle: float = 0.0              # straighten, degrees -45..45 (per photo, see geometry.py)
     crop: list | None = None        # [x0, y0, x1, y1] normalised in the straightened frame (per photo)
     aspect: str = "orig"            # crop preset key (geometry.ASPECTS)
-    strokes: list = field(default_factory=list)  # manual dodge/burn, see brush_map()
+    strokes: list = field(default_factory=list)       # manual dodge/burn, see brush_map()
+    heal_strokes: list = field(default_factory=list)  # non-destructive frequency-separated healing strokes
     rating: int = 0                 # 0..5 star rating per photo (Library module)
+    flag: int = 0                   # -1 = Odrzucone (X), 0 = Brak (U), +1 = Wybrane (P)
     reference_path: str | None = None  # optional per-photo reference path override ('__none__' = standalone)
     ref_colorchecker: bool = False  # whether per-photo reference is a ColorChecker 24 chart
 
@@ -81,24 +88,33 @@ class Params:
                   "deshine", "blemish", "eyes_teeth", "mask_protect", "sharpen_amount", "denoise", "wide"):
             setattr(p, k, float(np.clip(getattr(p, k), 0, 1)))
         for k in ("contrast", "brightness", "dehaze", "texture", "shadows", "highlights", "whites", "blacks",
-                  "clarity", "saturation", "vibrance", "shadow_tone", "highlight_tone", "hsl_green", "hsl_blue",
+                  "clarity", "saturation", "vibrance", "shadow_tone", "midtone_tone", "highlight_tone",
+                  "grading_balance", "hsl_green", "hsl_blue",
                   "skin_hue", "mask_hue_tol", "temp", "tint", "light_x", "light_y", "bg_exposure"):
             setattr(p, k, float(np.clip(getattr(p, k), -1, 1)))
+        for hk in ("hsl_hue", "hsl_sat", "hsl_lum"):
+            raw_arr = list(getattr(p, hk) or [])
+            padded = (raw_arr + [0.0] * 8)[:8]
+            setattr(p, hk, [float(np.clip(v, -1.0, 1.0)) for v in padded])
         if p.sharpen_mode not in DET.SHARPEN_MODES: p.sharpen_mode = "portrait"
         p.rating = int(np.clip(int(p.rating or 0), 0, 5))
+        p.flag = int(np.clip(int(p.flag or 0), -1, 1))
         p.reference_path = str(p.reference_path) if p.reference_path else None
         p.ref_colorchecker = bool(p.ref_colorchecker)
         p.strokes = list(p.strokes or [])
+        p.heal_strokes = list(p.heal_strokes or [])
         p.angle = float(np.clip(p.angle or 0.0, -45, 45))
         p.crop = GEO.clamp_crop(p.crop)
         if p.aspect not in GEO.ASPECTS: p.aspect = "orig"
         return p
 
     def colour_key(self):
-        return tuple(round(getattr(self, k), 3) for k in (
+        base = tuple(round(getattr(self, k), 3) for k in (
             "strength", "exposure", "contrast", "brightness", "dehaze", "shadows", "highlights", "whites", "blacks",
-            "saturation", "vibrance", "shadow_tone", "highlight_tone", "hsl_green", "hsl_blue",
-            "skin_cast", "skin_hue", "wide", "temp", "tint"))
+            "saturation", "vibrance", "shadow_tone", "midtone_tone", "highlight_tone", "grading_balance",
+            "hsl_green", "hsl_blue", "skin_cast", "skin_hue", "wide", "temp", "tint"))
+        hsl_k = tuple(round(float(v), 3) for hk in ("hsl_hue", "hsl_sat", "hsl_lum") for v in getattr(self, hk))
+        return base + hsl_k
 
 @dataclass
 class RefAnalysis:
@@ -414,7 +430,8 @@ class Engine:
             rgb = cv2.cvtColor(O.reshape(-1, 1, 3).astype(np.float32), cv2.COLOR_LAB2RGB).reshape(N, N, N, 3)
             rgb = np.clip(rgb, 0, 1)
         # Photographic tone & colour edits in linear light + OKLab (work even when strength == 0)
-        has_grading = any((p.shadow_tone, p.highlight_tone, p.hsl_green, p.hsl_blue))
+        has_hsl8 = any(any(abs(v) > 1e-4 for v in getattr(p, hk)) for hk in ("hsl_hue", "hsl_sat", "hsl_lum"))
+        has_grading = any((p.shadow_tone, p.midtone_tone, p.highlight_tone, p.hsl_green, p.hsl_blue, has_hsl8))
         has_tone = any((p.exposure, p.contrast, p.brightness, p.dehaze, p.highlights, p.shadows, p.whites, p.blacks,
                         p.saturation, p.vibrance, has_grading, is_skin and (p.skin_cast or p.skin_hue)))
         if has_tone:
@@ -426,8 +443,13 @@ class Engine:
             if is_skin and (p.skin_cast or p.skin_hue):
                 lin = TN.apply_skin_oklch(lin, p.skin_cast, p.skin_hue)
             if has_grading:
-                lin = TN.apply_color_grading_oklab(lin, shadow_tone=p.shadow_tone, highlight_tone=p.highlight_tone,
-                                                   hsl_green=p.hsl_green, hsl_blue=p.hsl_blue, is_skin=is_skin)
+                lin = TN.apply_color_grading_oklab(
+                    lin, shadow_tone=p.shadow_tone, highlight_tone=p.highlight_tone,
+                    hsl_green=p.hsl_green, hsl_blue=p.hsl_blue,
+                    midtone_tone=p.midtone_tone, grading_balance=p.grading_balance,
+                    hsl_hue=p.hsl_hue, hsl_sat=p.hsl_sat, hsl_lum=p.hsl_lum,
+                    is_skin=is_skin,
+                )
             if p.saturation or p.vibrance:
                 lin = TN.apply_color_oklab(lin, p.saturation, p.vibrance, is_skin=is_skin)
             rgb = TN.lin_to_srgb(lin)
@@ -498,6 +520,8 @@ class Engine:
         T["masks_s"] = time.perf_counter()-t; t = time.perf_counter()
         out = R.render(src, lut_bg, lut_sk, mq, gain)
         T["render_s"] = time.perf_counter()-t; t = time.perf_counter()
+        if p.heal_strokes:
+            out = SP.apply_heal_strokes(out, p.heal_strokes)
         if db_enabled and p.db > 0 and fit.faces_n:
             lms = getattr(fit, "lms_n", None)
             out = _dodge_burn_region(out, mq_raw, [f*W for f in fit.faces_n], p.db, [l*W for l in lms] if lms else None)

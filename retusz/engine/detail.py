@@ -54,13 +54,14 @@ def _denoise_oklab_edge_preserving(rgb: np.ndarray, amount: float) -> np.ndarray
 
 def _rl_deconvolution_luma(Y: np.ndarray, amount: float, sigma: float = 1.0, iters: int = 3) -> np.ndarray:
     """Damped Richardson-Lucy deconvolution on luminance Y in [0, 255] with local morphological halo clamp."""
+    from . import device as DEV
     amt = float(np.clip(amount, 0.0, 1.0))
     y_norm = np.clip(Y / 255.0, 1e-4, 1.0).astype(np.float32)
     u = y_norm.copy()
     for _ in range(iters):
-        conv = cv2.GaussianBlur(u, (0, 0), sigma)
+        conv = DEV.ocl_gaussian_blur(u, sigma)
         ratio = y_norm / np.maximum(conv, 1e-3)
-        corr = cv2.GaussianBlur(ratio, (0, 0), sigma)
+        corr = DEV.ocl_gaussian_blur(ratio, sigma)
         u = np.clip(u * (1.0 + 1.15 * amt * (corr - 1.0)), 1e-4, 1.35)
     d = (u - y_norm) * 255.0 * (1.55 * amt)
     k5 = np.ones((5, 5), np.uint8)
@@ -74,6 +75,7 @@ def apply_detail_pass(rgb: np.ndarray, mask_q: np.ndarray | None = None,
                       sharpen_amount: float = 0.0, sharpen_mode: str = "portrait",
                       texture: float = 0.0, denoise: float = 0.0) -> np.ndarray:
     """Apply live studio detail pass (Denoise + Texture + Multi-Mode Sharpening) to sRGB uint8 image."""
+    from . import device as DEV
     out = rgb
     if denoise > 1e-4:
         out = _denoise_oklab_edge_preserving(out, denoise)
@@ -87,13 +89,13 @@ def apply_detail_pass(rgb: np.ndarray, mask_q: np.ndarray | None = None,
 
     sk = None
     if mask_q is not None and mask_q.size > 0:
-        sk = mask_q.astype(np.float32) if mask_q.shape[:2] == (H, W) else cv2.resize(mask_q.astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR)
+        sk = mask_q.astype(np.float32) if mask_q.shape[:2] == (H, W) else DEV.ocl_resize(mask_q.astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR)
         sk = np.clip(sk, 0.0, 1.0)
 
     # 1. Texture / Structure ('Struktura', -1..1): fine detail band (sigma 0.7 .. 2.2 px)
     if abs(texture) > 1e-4:
-        y_fine = cv2.GaussianBlur(Y, (0, 0), 0.7)
-        y_mid = cv2.GaussianBlur(Y, (0, 0), 2.2)
+        y_fine = DEV.ocl_gaussian_blur(Y, 0.7)
+        y_mid = DEV.ocl_gaussian_blur(Y, 2.2)
         d_tex = (y_fine - y_mid) * float(texture) * 0.85
         if sk is not None and texture > 0:
             d_tex *= (1.0 - 0.55 * sk)
@@ -112,8 +114,8 @@ def apply_detail_pass(rgb: np.ndarray, mask_q: np.ndarray | None = None,
             if sk is not None:
                 d_sh *= (1.0 - 0.45 * sk)
         else:
-            # 'portrait' or 'edges': Morphological 5x5 Clamped Unsharp Mask (0% halo on step edges)
-            d_raw = (Y - cv2.GaussianBlur(Y, (0, 0), 1.35)) * (2.75 * amt)
+            # 'portrait' or 'edges': Morphological 5x5 Clamped Unsharp Mask (halo-clamped on step edges)
+            d_raw = (Y - DEV.ocl_gaussian_blur(Y, 1.35)) * (2.75 * amt)
             if mode == "portrait" and sk is not None:
                 d_raw *= (1.0 - 0.80 * sk)
             k5 = np.ones((5, 5), np.uint8)

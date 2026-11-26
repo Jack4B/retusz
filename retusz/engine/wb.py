@@ -72,3 +72,43 @@ def solve(patch):
     if np.any(lms <= 1e-6): return None
     L, M_, S = lms
     return float(np.log(S/L)/(2*KT)), float(-np.log(np.sqrt(L*S)/M_)/KG)
+
+
+def auto_wb_scene(rgb: np.ndarray, faces_n=(), p_norm: float = 6.0, damping: float = 0.78) -> tuple[float, float]:
+    """Automatic scene white balance via Shades-of-Gray (Finlayson & Trezzi 2004, Minkowski norm p=6)
+    in Bradford cone space, excluding detected faces and skin-locus pixels so warm skin is never
+    mistaken for an ambient warm cast."""
+    import cv2
+    H, W = rgb.shape[:2]
+    s = min(1.0, 256.0 / max(H, W))
+    sm = rgb if s >= 1.0 else cv2.resize(rgb, (max(4, int(round(W * s))), max(4, int(round(H * s)))),
+                                          interpolation=cv2.INTER_AREA)
+    sh, sw = sm.shape[:2]
+    valid = (sm.max(axis=-1) < 246) & (sm.min(axis=-1) > 12)
+
+    # Exclude detected face+neck regions
+    for f in (faces_n or ()):
+        fx, fy, fw, fh = (float(v) for v in f[:4])
+        x0, x1 = max(0, int((fx - 0.1 * fw) * sw)), min(sw, int((fx + 1.1 * fw) * sw))
+        y0, y1 = max(0, int((fy - 0.1 * fh) * sw)), min(sh, int((fy + 1.35 * fh) * sw))
+        valid[y0:y1, x0:x1] = False
+
+    # Also attenuate strong skin-chromaticity patches if faces exist
+    ycc = cv2.cvtColor(sm, cv2.COLOR_RGB2YCrCb)
+    skin_like = (ycc[..., 1] >= 136) & (ycc[..., 1] <= 178) & (ycc[..., 2] >= 80) & (ycc[..., 2] <= 130)
+    non_skin = valid & (~skin_like)
+    mask = non_skin if int(non_skin.sum()) >= max(64, int(0.08 * sh * sw)) else valid
+    if int(mask.sum()) < 32:
+        return 0.0, 0.0
+
+    lin = to_lin(sm[mask])
+    # Minkowski p-norm illuminant estimate in linear RGB
+    est_rgb = np.power(np.mean(np.power(np.maximum(lin, 1e-5), p_norm), axis=0), 1.0 / p_norm)
+    lms = (_SRGB_TO_BFD @ est_rgb) / _WHITE_BFD
+    if np.any(lms <= 1e-6):
+        return 0.0, 0.0
+    L, M_, S = lms
+    dt = float(np.log(S / L) / (2.0 * KT)) * damping
+    dti = float(-np.log(np.sqrt(L * S) / M_) / KG) * damping
+    return round(float(np.clip(dt, -0.65, 0.65)), 3), round(float(np.clip(dti, -0.55, 0.55)), 3)
+
