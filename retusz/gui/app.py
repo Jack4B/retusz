@@ -66,7 +66,11 @@ _COPY_KEYS = (
 SLIDER_AREA_H = 166
 TOOLS = ["Pędzel D&B", "Kadr"]
 TOOL_W, TOOL_H = 268, 184
-PHOTO_TYPES = [("Zdjęcia i RAW", "*.jpg *.jpeg *.png *.tif *.tiff *.webp *.nef *.NEF *.nrw *.NRW")]
+PHOTO_TYPES = [(
+    "Zdjęcia i RAW",
+    "*.jpg *.jpeg *.png *.tif *.tiff *.webp "
+    "*.nef *.NEF *.nrw *.NRW *.cr2 *.CR2 *.cr3 *.CR3 *.arw *.ARW *.dng *.DNG *.raf *.RAF *.orf *.ORF *.rw2 *.RW2 *.pef *.PEF"
+)]
 BRUSH_MIN, BRUSH_MAX = 5, 600   # brush radius in original-image pixels
 BRUSH_MODES = ["Wył.", "Rozjaśnij", "Przyciemnij"]
 
@@ -180,12 +184,13 @@ class RetuszApp(ctk.CTk):
 
         act = ctk.CTkFrame(hdr, fg_color=T.CARD); act.pack(side="right")
         def sbtn(text, cmd, w):
-            b = T.button(act, text, cmd, width=w); b.configure(height=28, font=T.font(12)); b.pack(side="left", padx=(4, 0)); return b
-        self.undo_btn = sbtn("Cofnij", self.undo, 58)
-        self.redo_btn = sbtn("Ponów", self.redo, 58)
-        sbtn("Kopiuj", self.copy_params, 58)
-        self.paste_btn = sbtn("Wklej", self.paste_params, 54)
-        sbtn("Zeruj", self.reset_adjustments, 54)
+            b = T.button(act, text, cmd, width=w); b.configure(height=28, font=T.font(11)); b.pack(side="left", padx=(3, 0)); return b
+        self.undo_btn = sbtn("Cofnij", self.undo, 46)
+        self.redo_btn = sbtn("Ponów", self.redo, 46)
+        sbtn("Kopiuj", self.copy_params, 46)
+        self.paste_btn = sbtn("Wklej", self.paste_params, 44)
+        sbtn("→seria", self.make_series_default, 50)
+        sbtn("Zeruj", self.reset_adjustments, 44)
 
         sl_area = ctk.CTkFrame(sl, fg_color=T.CARD, height=SLIDER_AREA_H)
         sl_area.pack(fill="x", expand=True); sl_area.pack_propagate(False)

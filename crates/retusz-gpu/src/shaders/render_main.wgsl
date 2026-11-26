@@ -86,6 +86,17 @@ fn sample_tetra(rgb01: vec3<f32>) -> vec3<f32> {
     }
 }
 
+fn apply_gain_soft_knee(acc: f32, g: f32) -> f32 {
+    let v_lin = acc * g;
+    if (g <= 1.0 || v_lin <= 0.72) {
+        return clamp(v_lin, 0.0, 1.0);
+    }
+    let k = max(0.72, acc);
+    let d = v_lin - k;
+    let h = max(1.0 - k, 0.0);
+    return clamp(k + (d * h) / (d + h + 1e-6), 0.0, 1.0);
+}
+
 @compute @workgroup_size(16, 16, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = gid.x;
@@ -110,10 +121,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     if (abs(g - 1.0) > 1e-4) {
-        let lr = srgb_to_lin(c.x) * g;
-        let lg = srgb_to_lin(c.y) * g;
-        let lb = srgb_to_lin(c.z) * g;
-        c = vec3<f32>(lin_to_srgb(lr), lin_to_srgb(lg), lin_to_srgb(lb));
+        c = vec3<f32>(
+            apply_gain_soft_knee(c.x, g),
+            apply_gain_soft_knee(c.y, g),
+            apply_gain_soft_knee(c.z, g)
+        );
     }
 
     var ro = u32(clamp(c.x, 0.0, 1.0) * 255.0 + 0.5);

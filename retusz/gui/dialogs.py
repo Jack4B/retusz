@@ -64,9 +64,9 @@ class ModelDialog(_Dialog):
         self._cancel = True; self.on_done(False); self.destroy()
 
 class SettingsDialog(_Dialog):
-    """Ustawienia: Ogólne (podgląd, silnik, urządzenie, model) and Eksport (JPG, profil, DPI, rozmiar, wyostrzanie, metadane)."""
+    """Ustawienia: Ogólne (podgląd, silnik, urządzenie, model) and Eksport (Format, JPG, profil, DPI, rozmiar, wyostrzanie, metadane)."""
     def __init__(self, master, settings, on_save):
-        super().__init__(master, "Ustawienia", 560, 660); self.s = settings; self.on_save = on_save
+        super().__init__(master, "Ustawienia", 560, 700); self.s = settings; self.on_save = on_save
         row_b = ctk.CTkFrame(self, fg_color=T.BG); row_b.pack(side="bottom", fill="x", padx=20, pady=(6, 14))
         T.button(row_b, "Zapisz", self.save, accent=True).pack(side="right")
         T.button(row_b, "Anuluj", self.destroy).pack(side="right", padx=8)
@@ -119,6 +119,7 @@ class SettingsDialog(_Dialog):
 
     def _export(self, tab):
         o = self.s.export_options(); g = self._grid(tab); r = 0
+        self._lbl(g, "Format pliku", r); self.fmt = self._menu(g, list(EX.FORMATS.values()), EX.FORMATS[o.format], r); r += 1
         self.q = self._slider(g, r, "Jakość JPG", 50, 100, o.quality, lambda v: str(int(round(float(v))))); r += 1
         self._lbl(g, "Próbkowanie koloru", r); self.sub = self._menu(g, list(EX.SUBSAMPLING), o.subsampling, r); r += 1
         T.label(g, "4:4:4 = najlepsza jakość, 4:2:0 = mniejszy plik", 11, T.MUTED).grid(row=r, column=1, columnspan=2, sticky="w"); r += 1
@@ -179,6 +180,7 @@ class SettingsDialog(_Dialog):
         s.method = inv(models.METHODS, self.meth.get()); s.show_mask = bool(self.mask.get())
         s.device = inv(DEVICES, self.dev.get())
         o = EX.ExportOptions.from_dict({
+            "format": inv(EX.FORMATS, self.fmt.get()),
             "quality": int(round(self.q.get())), "subsampling": self.sub.get(), "profile": inv(CM.OUTPUT_PROFILES, self.prof.get()),
             "dpi": self._int(self.dpi, 300), "long_edge": self._int(self.edge, 0), "suffix": self.suf.get().strip(),
             "metadata": inv(EX.METADATA, self.meta.get()), "sharpen": inv(EX.SHARPEN, self.sh.get()),
