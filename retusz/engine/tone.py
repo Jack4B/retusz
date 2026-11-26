@@ -200,28 +200,10 @@ CLARITY_SIDE = 256   # fixed analysis scale so preview and full-res export produ
 
 
 def clarity_gain(Lq, skin_q, amount: float):
-    """Halo-free edge-preserving local mid-tone contrast via self-guided filter (He, Sun, Tang 2010),
-    computed at a fixed working size (CLARITY_SIDE) for resolution independence (preview == export).
-    Positive: crisp 3D micro-contrast, strongly sparing skin pores. Negative: soft dreamy portrait glow."""
-    if not amount:
-        return np.zeros(Lq.shape, np.float32)
-    qh, qw = Lq.shape
-    sc = min(1.0, CLARITY_SIDE/max(qh, qw))
-    cw, ch = max(4, round(qw*sc)), max(4, round(qh*sc))
-    L = Lq.astype(np.float32) if (ch, cw) == (qh, qw) else cv2.resize(Lq.astype(np.float32), (cw, ch), interpolation=cv2.INTER_AREA)
-    r = max(2, int(round(max(ch, cw)/42))); k = (2*r + 1, 2*r + 1)
-    box = lambda x: cv2.boxFilter(x, -1, k)
-    m = box(L); v = box(L*L) - m*m
-    a = v/(v + 8.0**2); b = m - a*m
-    base = box(a)*L + box(b)
-    det = np.clip(L - base, -10.0, 10.0)
-    l01 = np.clip(L/100.0, 0.0, 1.0)
-    w_mid = 4.0*l01*(1.0 - l01)
-    if skin_q is not None:
-        sk = skin_q.astype(np.float32) if skin_q.shape == (ch, cw) else cv2.resize(skin_q.astype(np.float32), (cw, ch), interpolation=cv2.INTER_AREA)
-        sk = np.clip(sk, 0.0, 1.0)
-    else:
-        sk = 0.0
-    skin_w = (1.0 - 0.65*sk) if amount > 0 else (1.0 - 0.25*sk)
-    g = np.clip(float(amount)*0.22*w_mid*skin_w*det/np.maximum(L, 22.0), -0.25, 0.25).astype(np.float32)
-    return g if (ch, cw) == (qh, qw) else cv2.resize(g, (qw, qh), interpolation=cv2.INTER_LINEAR)
+    """Halo-free edge-preserving local mid-tone contrast via Fast Local Laplacian Filter
+    (Paris, Hasinoff & Kautz 2011; Aubry et al. 2014), computed at a fixed working size for
+    resolution independence (preview == export).
+    Positive: crisp 3D micro-contrast with zero halo, sparing skin pores. Negative: soft portrait glow."""
+    from .llf import fast_llf_gain
+    return fast_llf_gain(Lq, skin_q, amount)
+

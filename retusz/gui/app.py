@@ -20,7 +20,7 @@ from ..engine import render as R, color as C, device as DEV, modflows as MF, rel
 from ..engine import histo as HI, wb as WB, geometry as G, colorchecker as CC
 
 ENGINE_LABEL = {"ai": "AI (B6)", "ai_light": "AI lekki (B0)", "classic": "bez AI (IDT)"}
-CANVAS_MODES = ["Wynik", "Przed | Po", "Z wzorcem"]
+CANVAS_MODES = ["Wynik", "Przed | Po", "Podział", "Z wzorcem"]
 SLIDER_TABS = ["Światło i Kolor", "Portret i Plastyka", "▸ Wzorzec (AI)"]
 SLIDER_GROUPS = {
     SLIDER_TABS[0]: [  # (key, label, lo, hi, kind, row, col)
@@ -42,12 +42,15 @@ SLIDER_GROUPS = {
         ("skin_even", "Równanie skóry", 0, 100, "pct", 1, 0),
         ("skin_cast", "Czysta skóra", 0, 100, "pct", 1, 1),
         ("skin_hue", "Odcień skóry", -100, 100, "num", 1, 2),
-        ("vignette", "Winieta", 0, 100, "pct", 2, 0),
-        ("wide", "Pełne barwy", 0, 100, "pct", 2, 1),
+        ("deshine", "Redukcja połysku", 0, 100, "pct", 2, 0),
+        ("blemish", "Niedoskonałości", 0, 100, "pct", 2, 1),
+        ("eyes_teeth", "Oczy i zęby", 0, 100, "pct", 2, 2),
+        ("vignette", "Winieta", 0, 100, "pct", 2, 3),
     ],
     SLIDER_TABS[2]: [
         ("strength", "Siła kolorów", 0, 100, "pct", 0, 0),
         ("skin", "Ochrona skóry", 0, 100, "pct", 0, 1),
+        ("wide", "Pełne barwy", 0, 100, "pct", 1, 0),
     ],
 }
 _TAB_ALIASES = {
@@ -61,7 +64,7 @@ _DEFAULTS = Params()
 _COPY_KEYS = (
     "strength", "skin", "exposure", "contrast", "shadows", "highlights", "whites", "blacks",
     "vignette", "db", "plastic", "clarity", "light_angle", "saturation", "vibrance",
-    "skin_even", "skin_cast", "skin_hue", "wide", "temp", "tint",
+    "skin_even", "skin_cast", "skin_hue", "deshine", "blemish", "eyes_teeth", "wide", "temp", "tint",
 )
 SLIDER_AREA_H = 166
 TOOLS = ["Pędzel D&B", "Kadr"]
@@ -251,9 +254,6 @@ class RetuszApp(ctk.CTk):
         )
         self.preset_menu.set("Portret naturalny"); self.preset_menu.grid(row=1, column=0, columnspan=3, sticky="ew")
 
-        hint = T.label(f1, "Dwuklik na suwaku: reset  ·  \\ : Przed/Po  ·  M: maska skóry", 11, T.MUTED, anchor="w")
-        hint.grid(row=2, column=2, columnspan=2, sticky="sw", padx=6, pady=(14, 3))
-
         # Tab 2 (Collapsible / on-demand Reference Match & ColorChecker bonus section):
         f2 = self.slider_frames[SLIDER_TABS[2]]
         rc = ctk.CTkFrame(f2, fg_color=T.CARD); rc.grid(row=0, column=2, sticky="ew", padx=6, pady=3)
@@ -275,7 +275,7 @@ class RetuszApp(ctk.CTk):
             "Edytor działa samodzielnie bez wzorca. Wybierz zdjęcie wzorcowe albo zdjęcie z tablicą ColorChecker Classic (24 pola), aby skalibrować całą serię.",
             12, T.MUTED, anchor="w", justify="left"
         )
-        self.ref_info_lbl.grid(row=1, column=0, columnspan=4, sticky="w", padx=6, pady=(10, 2))
+        self.ref_info_lbl.grid(row=1, column=1, columnspan=3, sticky="w", padx=6, pady=(10, 2))
         f0.lift()
 
         tools = ctk.CTkFrame(ctl, fg_color=T.CARD)
@@ -417,13 +417,15 @@ class RetuszApp(ctk.CTk):
             w_.grid_remove()
         for c in range(3):
             self.imgs.grid_columnconfigure(c, weight=0, uniform="")
-        if m == "Wynik":
+        if m in ("Wynik", "Podział"):
             self.imgs.grid_columnconfigure(1, weight=1, uniform="")
+            self.res_hdr.configure(text="Podział: Przed | Po (przeciągnij kurtynę)" if m == "Podział" else ("Wynik (Oryginał)" if self.show_before else "Wynik"))
             self.res_hdr.grid(row=0, column=1, sticky="w", padx=4, pady=(0, 4))
             self.view_res.grid(row=1, column=1, sticky="nsew", padx=4)
         elif m == "Przed | Po":
             for c in (0, 1):
                 self.imgs.grid_columnconfigure(c, weight=1, uniform="v2")
+            self.res_hdr.configure(text="Wynik (Oryginał)" if self.show_before else "Wynik")
             self.src_hdr.grid(row=0, column=0, sticky="w", padx=4, pady=(0, 4))
             self.res_hdr.grid(row=0, column=1, sticky="w", padx=4, pady=(0, 4))
             self.view_src.grid(row=1, column=0, sticky="nsew", padx=4)
@@ -431,6 +433,7 @@ class RetuszApp(ctk.CTk):
         else:  # "Z wzorcem"
             for c in range(3):
                 self.imgs.grid_columnconfigure(c, weight=1, uniform="v3")
+            self.res_hdr.configure(text="Wynik (Oryginał)" if self.show_before else "Wynik")
             self.src_hdr.grid(row=0, column=0, sticky="w", padx=4, pady=(0, 4))
             self.res_hdr.grid(row=0, column=1, sticky="w", padx=4, pady=(0, 4))
             self.ref_hdr.grid(row=0, column=2, sticky="w", padx=4, pady=(0, 4))
@@ -471,12 +474,12 @@ class RetuszApp(ctk.CTk):
             elif getattr(self.reference, "colorchecker", False):
                 txt = f"Tablica ColorChecker: {self.reference.path.name}  ·  Trwa analiza 24 pól…"
             else:
-                txt = f"Aktywny wzorzec: {self.reference.path.name}  ·  Widok „Z wzorcem” w górnym pasku pokazuje 3 kolumny."
+                txt = f"Aktywny wzorzec: {self.reference.path.name}  ·  Widok „Z wzorcem” pokazuje 3 kolumny."
             self.ref_info_lbl.configure(text=txt, text_color=T.ACCENT)
             self.clear_ref_btn.configure(state="normal")
         else:
             self.ref_info_lbl.configure(
-                text="Edytor działa samodzielnie bez wzorca. Wybierz zdjęcie wzorcowe albo zdjęcie z tablicą ColorChecker Classic (24 pola), aby skalibrować całą serię.",
+                text="Edytor działa samodzielnie bez wzorca. Wybierz wzorzec lub tablicę ColorChecker (24 pola), aby skalibrować serię.",
                 text_color=T.MUTED
             )
             self.clear_ref_btn.configure(state="disabled")
@@ -632,6 +635,14 @@ class RetuszApp(ctk.CTk):
             self.view_res.detail = self._decorate(det); self.view_res.redraw()
         elif self.detail_raw is not None:
             self.view_res.detail = self._decorate(self.detail_raw); self.view_res.redraw()
+        if hasattr(self, "canvas_mode") and self.canvas_mode.get() == "Podział" and self.src_prev is not None and not self.show_before:
+            bf = G.apply(self.src_prev, a, None, interp=cv2.INTER_CUBIC) if a else self.src_prev
+            bdet = None
+            if self.full_cache is not None and self.idx >= 0 and self.full_cache[0] == self.photos[self.idx]:
+                bdet = self._decorate(G.apply(self.full_cache[1], a, None, interp=cv2.INTER_LINEAR) if a else self.full_cache[1])
+            self.view_res.set_split(self._decorate(bf), getattr(self, "split_u", 0.5), bdet)
+        else:
+            self.view_res.set_split(None, None, None)
         if self.view_res.zoom != self.view_src.zoom or self.view_res.center != self.view_src.center:
             self.view_res.set_view(self.view_src.zoom, self.view_src.center)
         self._sync_zoom_label(); self._update_hist()
@@ -641,7 +652,8 @@ class RetuszApp(ctk.CTk):
             self.before_btn.configure(border_color=T.ACCENT if self.show_before else T.BORDER,
                                       text_color=T.ACCENT if self.show_before else T.TEXT)
         if getattr(self, "res_hdr", None) is not None:
-            self.res_hdr.configure(text="Wynik (Oryginał)" if self.show_before else "Wynik",
+            m = self.canvas_mode.get() if hasattr(self, "canvas_mode") else "Przed | Po"
+            self.res_hdr.configure(text="Wynik (Oryginał)" if self.show_before else ("Podział: Przed | Po (przeciągnij kurtynę)" if m == "Podział" else "Wynik"),
                                    text_color=T.ACCENT if self.show_before else T.TEXT)
 
     def toggle_before(self, on=None):
@@ -667,7 +679,8 @@ class RetuszApp(ctk.CTk):
         if self.frame is None: self.hist.draw(None, active=self.show_clip); return
         h, w = self.frame.shape[:2]; x0, y0, x1, y1 = G.crop_px(self.params.crop, w, h)
         reg = self.frame[y0:y1, x0:x1]; lo, hi = HI.clipping(reg)[:2]
-        self.hist.draw(HI.histogram(reg), lo, hi, self.show_clip)
+        vec = HI.skin_vectorscope(reg, self.mask_prev)
+        self.hist.draw(HI.histogram(reg), lo, hi, self.show_clip, vec=vec)
         self.clip_lbl.configure(text=f"Cienie {lo*100:.1f}% · Światła {hi*100:.1f}%".replace(".", ","),
                                 text_color=T.TEXT if max(lo, hi) > 0.005 else T.MUTED)
 
@@ -1066,11 +1079,20 @@ class RetuszApp(ctk.CTk):
         self.view_res.focus_set()
         if self.picking: self._pick(e); return
         if self.tool == "crop": self._crop_press(e); return
+        if hasattr(self, "canvas_mode") and self.canvas_mode.get() == "Podział" and not self._space and not self._brush_on():
+            self._split_drag = True
+            self.split_u = float(np.clip(self.view_res.to_norm(e.x, e.y)[0], 0.02, 0.98))
+            self.view_res.split_u = self.split_u; self.view_res.redraw()
+            return
         if self._space or not self._brush_on():
             self._pan_start(self.view_res, e); return
         self._stroke = [self.view_res.to_norm(e.x, e.y)]; self._last = (e.x, e.y)
 
     def _brush_move(self, e):
+        if getattr(self, "_split_drag", False):
+            self.split_u = float(np.clip(self.view_res.to_norm(e.x, e.y)[0], 0.02, 0.98))
+            self.view_res.split_u = self.split_u; self.view_res.redraw()
+            return
         if self.tool == "crop": self._crop_move(e); return
         if self._pan is not None: self._pan_move(self.view_res, e); return
         self._brush_cursor(e)
@@ -1082,6 +1104,8 @@ class RetuszApp(ctk.CTk):
         self._last = (e.x, e.y)
 
     def _brush_release(self, e):
+        if getattr(self, "_split_drag", False):
+            self._split_drag = False; return
         if self.tool == "crop": self._crop_release(e); return
         if self._pan is not None: self._pan_end(); return
         if self._stroke is None: return

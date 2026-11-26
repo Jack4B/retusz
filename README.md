@@ -1,13 +1,24 @@
-# Retusz 0.4.0
+# Retusz 0.5.0
 
 Aplikacja na Windows: pełnoprawny edytor portretowy z obróbką tonalną i barwną w przestrzeni OKLab (Ekspozycja EV, Kontrast,
-Światła/Cienie, Biele/Czernie, Balans bieli Bradford CAT, Przejrzystość), kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**,
-kontrolą zafarbów i odcienia skóry w **OKLCh**, **Plastyką 3D** (światło kierunkowe z mapy głębi), subtelnym **dodge & burn**,
+Światła/Cienie, Biele/Czernie, Balans bieli Bradford CAT, Przejrzystość na Szybkiej Piramidzie Laplace'a Fast LLF),
+kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**, biofizyczną optyką skóry (**Melanina/Hemoglobina**,
+dychromatyczna **Redukcja połysku SUV De-Shine**, dwupasmowe **Niedoskonałości Auto-Heal** z zachowaniem porów,
+anatomiczny retusz **Oczy i zęby**), **Wektorskopem Linii Skóry OKLCh (52°)**, **Plastyką 3D**, subtelnym **dodge & burn**,
 biblioteką **Presetów**, przenoszeniem gradingu z AI oraz opcjonalnym dopasowaniem kolorów do wzorca. Autor: Jack4B.
 
 ## Kontrola jakości
 
 `tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D, identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--colorchecker` sprawdza detekcję i kalibrację 24 pól ColorChecker (średnie ΔE₀₀ < 1,2, skóra < 1,0, szarości < 0,8).
+
+### 0.5.0
+- **Biofizyczna optyka skóry, dychromatyczny De-Shine SUV, Fast LLF i Wektorskop OKLCh** (`retusz/engine/skin_physics.py`, `retusz/engine/llf.py`, `crates/retusz-core/src/skin_physics.rs`):
+  - **Redukcja połysku (`deshine`, 0–100%)**: dychromatyczna separacja połysku w przestrzeni SUV (Mallick et al. 2005; Yang, Wang & Ahuja 2010) usuwa białe, tłuste odblaski z czoła, grzbietu nosa i policzków, odzyskując podpowierzchniową barwę skóry i zachowując 100% porów;
+  - **Separacja chromoforów Melanina / Hemoglobina** w dziedzinie gęstości optycznej $-\log_{10}(I_{\text{lin}})$ (Tsumura et al., SIGGRAPH 2003): wyrównywanie rumienia i zaczerwienień bez płaskiego rozmycia złocistego odcienia melaniny;
+  - **Niedoskonałości (`blemish`, 0–100%)**: dwupasmowy Auto-Heal w kanonicznej skali twarzy (`256 px` — zgodność podglądu i eksportu ΔE < 1) wykrywa punktowe wypryski wewnątrz bezpiecznej maski skóry, leczy wyłącznie pasmo bazowe i zachowuje pasmo wysokich częstotliwości (pory skóry);
+  - **Oczy i zęby (`eyes_teeth`, 0–100%)**: anatomicznie maskowane z 5 punktów YuNet podbicie mikrokontrastu i blasku tęczówki (z ochroną źrenicy i blików catchlight), redukcja zaczerwienienia białek oczu oraz naturalne zmniejszenie żółtego zafarbu zębów;
+  - **Szybka Lokalna Piramida Laplace'a (`Fast Local Laplacian Filter`, Aubry et al., ACM TOG 2014)** dla suwaka **Przejrzystość**: wieloskalowy mikrokontrast matematycznie wolny od efektu halo na krawędziach o wysokim kontraście (oprawki okularów, sylwetka);
+  - **Wektorskop Linii Skóry OKLCh (52°)** zintegrowany obok histogramu w prawym panelu oraz nowy tryb widoku **`Podział`** (interaktywna pionowa kurtyna Przed | Po przesuwana myszą na głównym płótnie).
 
 ### 0.4.0
 - **Jakość studyjna potoku obrazu (RAW / Soft-Knee / Linear Downsizing / Halo-Free USM / 16-bit TIFF)**:

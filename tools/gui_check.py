@@ -74,9 +74,9 @@ def script():
     for a in range(0, 360, 15):
         app.light.set(a); app._light(a); pump(2)
         if geom() != g0: print("LAYOUT CHANGED at", a, geom(), g0); ok = False; break
-    for k in ("skin_even", "skin_cast", "skin_hue", "clarity"):
+    for k in ("skin_even", "skin_cast", "skin_hue", "clarity", "deshine", "blemish", "eyes_teeth"):
         s = app.sliders[k][0]
-        for v in (0, 100, 0) if k in ("skin_even", "skin_cast") else (-100, 100, 0): s.set(v); app._slider(k, v); pump(2)
+        for v in (0, 100, 0) if k in ("skin_even", "skin_cast", "deshine", "blemish", "eyes_teeth") else (-100, 100, 0): s.set(v); app._slider(k, v); pump(2)
         if geom() != g0: print("LAYOUT CHANGED by", k); ok = False
     app.slider_tabs.set("Światło i Kolor"); app._slider_tab("Światło i Kolor"); pump(3)
     print("layout stable:", ok, flush=True)

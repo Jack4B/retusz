@@ -15,6 +15,7 @@ class ImageView(tk.Canvas):
     def __init__(self, master, placeholder="", **kw):
         super().__init__(master, bg=T.PANEL, highlightthickness=1, highlightbackground=T.BORDER, bd=0, **kw)
         self.rgb = None; self.icc = None; self.full_wh = None; self.detail = None
+        self.split_rgb = None; self.split_detail = None; self.split_u = None; self._split_disp = None
         self.zoom = None; self.center = [0.5, 0.5]; self.geom = (0, 0, 1, 1)
         self._photo = None; self._disp = None; self.placeholder = placeholder
         self.on_view_change = None; self.on_redraw = None
@@ -26,6 +27,11 @@ class ImageView(tk.Canvas):
         if not keep_view: self.zoom = None; self.center = [0.5, 0.5]; self.detail = None
         self.redraw()
 
+    def set_split(self, before_rgb=None, split_u=None, before_detail=None):
+        self.split_rgb = before_rgb; self.split_u = split_u; self.split_detail = before_detail
+        self._split_disp = None
+        self.redraw()
+
     def set_detail(self, rgb):
         self.detail = rgb; self.redraw()
 
@@ -34,6 +40,11 @@ class ImageView(tk.Canvas):
         if self._disp is None and self.rgb is not None:
             self._disp = CM.for_display(self.rgb, self.icc)
         return self._disp
+
+    def _base_split(self):
+        if self._split_disp is None and self.split_rgb is not None:
+            self._split_disp = CM.for_display(self.split_rgb, self.icc)
+        return self._split_disp
 
     def size_wh(self):
         if self.full_wh: return self.full_wh
@@ -80,7 +91,7 @@ class ImageView(tk.Canvas):
 
     # ----- drawing -----
     def redraw(self):
-        self.delete("img"); self.delete("ph")
+        self.delete("img"); self.delete("ph"); self.delete("split_line")
         cw, ch = max(2, self.winfo_width()), max(2, self.winfo_height())
         if self.rgb is None:
             self.create_text(cw/2, ch/2, text=self.placeholder, fill=T.MUTED, font=(T.FAMILY, 12), tags="ph", justify="center")
@@ -106,7 +117,34 @@ class ImageView(tk.Canvas):
         interp = cv2.INTER_AREA if tw < crop.shape[1] else (cv2.INTER_NEAREST if tw > 3*crop.shape[1] else cv2.INTER_LINEAR)
         img = cv2.resize(np.ascontiguousarray(crop), (tw, th), interpolation=interp)
         if use_detail: img = CM.for_display(img, self.icc)
+
+        # Interactive Before | After split curtain ("Podział")
+        if self.split_u is not None and self.split_rgb is not None:
+            b_src = self.split_detail if (use_detail and self.split_detail is not None) else self._base_split()
+            if b_src is not None and b_src.shape[:2] == (sh, sw):
+                b_crop = b_src[b0:b1, a0:a1]
+                b_img = cv2.resize(np.ascontiguousarray(b_crop), (tw, th), interpolation=interp)
+                if use_detail and self.split_detail is not None:
+                    b_img = CM.for_display(b_img, self.icc)
+                rel_u = (float(self.split_u) - a0 / sw) / max(1e-6, (a1 - a0) / sw)
+                sx_px = int(np.clip(round(rel_u * tw), 0, tw))
+                if sx_px > 0:
+                    img = img.copy()
+                    img[:, :sx_px] = b_img[:, :sx_px]
+
+        ix0 = x0 + a0/sw*dw
+        iy0 = y0 + b0/sh*dh
         self._photo = ImageTk.PhotoImage(Image.fromarray(img))
-        self.create_image(x0 + a0/sw*dw, y0 + b0/sh*dh, image=self._photo, anchor="nw", tags="img")
+        self.create_image(ix0, iy0, image=self._photo, anchor="nw", tags="img")
         self.tag_lower("img")
+
+        if self.split_u is not None and self.split_rgb is not None:
+            lx = x0 + float(self.split_u) * dw
+            if ix0 <= lx <= ix0 + tw:
+                self.create_line(lx, iy0, lx, iy0 + th, fill=T.ACCENT, width=2, tags="split_line")
+                my = iy0 + th * 0.5
+                self.create_oval(lx - 11, my - 11, lx + 11, my + 11, fill=T.CARD, outline=T.ACCENT, width=2, tags="split_line")
+                self.create_line(lx - 3, my - 5, lx - 3, my + 5, fill=T.TEXT, width=1, tags="split_line")
+                self.create_line(lx + 3, my - 5, lx + 3, my + 5, fill=T.TEXT, width=1, tags="split_line")
+
         if self.on_redraw: self.on_redraw()

@@ -27,6 +27,12 @@ pub struct Params {
     #[serde(default)]
     pub skin_hue: f32,       // -1.0 .. +1.0 ('Odcień skóry' OKLCh hue rotation)
     #[serde(default)]
+    pub deshine: f32,        //  0.0 .. +1.0 ('Redukcja połysku' Dichromatic SUV De-Shine)
+    #[serde(default)]
+    pub blemish: f32,        //  0.0 .. +1.0 ('Niedoskonałości' Two-band pore-preserving auto-heal)
+    #[serde(default)]
+    pub eyes_teeth: f32,     //  0.0 .. +1.0 ('Oczy i zęby' Anatomical iris/sclera/teeth enhancer)
+    #[serde(default)]
     pub exposure: f32,       // -2.0 .. +2.0 EV
     #[serde(default)]
     pub contrast: f32,       // -1.0 .. +1.0
@@ -74,6 +80,9 @@ impl Default for Params {
             skin_even: 0.0,
             skin_cast: 0.0,
             skin_hue: 0.0,
+            deshine: 0.0,
+            blemish: 0.0,
+            eyes_teeth: 0.0,
             exposure: 0.0,
             contrast: 0.0,
             highlights: 0.0,
