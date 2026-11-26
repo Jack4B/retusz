@@ -83,7 +83,7 @@ class SettingsDialog(_Dialog):
 
     @staticmethod
     def _menu(g, values, current, row, command=None):
-        m = ctk.CTkOptionMenu(g, values=values, fg_color=T.BTN, button_color=T.BTN_HOVER, text_color=T.TEXT, width=230, command=command)
+        m = ctk.CTkOptionMenu(g, values=values, fg_color=T.BTN, button_color=T.BTN_HOVER, text_color=T.TEXT, width=280, command=command)
         m.set(current); m.grid(row=row, column=1, columnspan=2, sticky="w", pady=5); return m
 
     @staticmethod
@@ -318,4 +318,94 @@ class ExportAsDialog(_Dialog):
         out_dir = self.dir_entry.get().strip()
         self.destroy()
         self.on_export(scope_key, opts, out_dir)
+
+
+COPY_GROUPS = (
+    ("wb", "Balans bieli (Temperatura, Odcień)", ("temp", "tint"), True),
+    ("tone", "Tonacja i Obecność (Podstawowe)", (
+        "exposure", "contrast", "brightness", "highlights", "shadows", "whites", "blacks", "vibrance", "saturation"
+    ), True),
+    ("hsl", "Kolor HSL (8 kanałów) i Color Grading", (
+        "shadow_tone", "midtone_tone", "highlight_tone", "grading_balance",
+        "hsl_green", "hsl_blue", "hsl_hue", "hsl_sat", "hsl_lum"
+    ), True),
+    ("portrait", "Portret, Skóra, Światło 3D i Światło mieszane", (
+        "db", "plastic", "light_angle", "light_x", "light_y", "bg_exposure",
+        "skin_hue", "mixed_light", "skin_cast", "skin_even", "deshine", "blemish", "eyes_teeth"
+    ), True),
+    ("detail", "Detal, Ostrość, Przejrzystość i Winieta", (
+        "sharpen_amount", "sharpen_mode", "texture", "clarity", "denoise", "dehaze", "vignette"
+    ), True),
+    ("ref", "Siła wzorca i Maska AI", ("strength", "skin", "mask_hue_tol", "mask_protect", "wide"), True),
+    ("crop", "Kadr i Prostowanie (ostrożnie!)", ("angle", "crop", "aspect"), False),
+)
+
+
+class SelectiveCopyDialog(_Dialog):
+    """Lightroom Classic style 'Kopiuj ustawienia…' dialog with group checkboxes (crop unchecked by default)."""
+    def __init__(self, master, on_copy):
+        super().__init__(master, "Kopiuj wybrane ustawienia (Lightroom Copy)", 470, 390)
+        self.on_copy = on_copy
+        T.label(self, "Wybierz grupy parametrów do skopiowania", 15, weight="bold").pack(anchor="w", padx=20, pady=(14, 4))
+        T.label(self, "Kadr oraz lokalny pędzel nie są zaznaczone domyślnie, aby chronić kompozycję innych zdjęć.",
+                11, T.MUTED, wraplength=430, justify="left").pack(anchor="w", padx=20, pady=(0, 8))
+        box = ctk.CTkFrame(self, fg_color=T.CARD, corner_radius=8)
+        box.pack(fill="both", expand=True, padx=20, pady=4)
+        self.vars: dict[str, ctk.BooleanVar] = {}
+        for gk, label, _, default_on in COPY_GROUPS:
+            v = ctk.BooleanVar(value=default_on)
+            self.vars[gk] = v
+            cb = ctk.CTkCheckBox(box, text=label, variable=v, fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
+                                 text_color=T.TEXT, font=T.font(12), checkbox_width=18, checkbox_height=18)
+            cb.pack(anchor="w", padx=14, pady=5)
+
+        row = ctk.CTkFrame(self, fg_color=T.BG)
+        row.pack(fill="x", padx=20, pady=12)
+        T.button(row, "Wszystkie", lambda: [v.set(True) for v in self.vars.values()], width=86).pack(side="left")
+        T.button(row, "Bez kadru", lambda: [v.set(k != "crop") for k, v in self.vars.items()], width=86).pack(side="left", padx=6)
+        T.button(row, "Kopiuj", self._apply, accent=True, width=96).pack(side="right")
+        T.button(row, "Anuluj", self.destroy, width=82).pack(side="right", padx=6)
+
+    def _apply(self):
+        keys: list[str] = []
+        for gk, _, gkeys, _ in COPY_GROUPS:
+            if self.vars[gk].get():
+                keys.extend(gkeys)
+        self.destroy()
+        self.on_copy(keys)
+
+
+class ShortcutsDialog(_Dialog):
+    """Lightroom Classic keyboard & mouse ergonomics cheat-sheet ('?')."""
+    def __init__(self, master):
+        super().__init__(master, "Skróty klawiszowe i ergonomia (Lightroom UX)", 560, 480)
+        T.label(self, "Skróty i szybka obsługa — Retusz Studio Pro", 15, weight="bold").pack(anchor="w", padx=20, pady=(14, 6))
+        scroll = ctk.CTkScrollableFrame(self, fg_color=T.CARD, corner_radius=8)
+        scroll.pack(fill="both", expand=True, padx=20, pady=4)
+        items = (
+            ("G  /  D  /  Y", "Moduł Biblioteka (G) · Edycja (D) · Widok Obok siebie Przed|Po (Y)"),
+            ("\\  (backslash)", "Szybkie przełączenie Przed / Po na głównym podglądzie"),
+            ("F6", "Pokaż / Ukryj boczny pasek miniatur serii (maksymalne miejsce na portret)"),
+            ("R lub C", "Narzędzie Kadr i Prostowanie (Enter / Esc — zamknij szufladę)"),
+            ("Q", "Pędzel Usuń / Popraw (inpainting + transfer prawdziwej tekstury porów)"),
+            ("K", "Pędzel lokalny Dodge & Burn ([ / ] lub Alt+kółko — zmiana rozmiaru)"),
+            ("W  /  M  /  J", "Pipeta balansu bieli (W) · Diagnostyka Maska AI (M) · Przepalenia i cienie (J)"),
+            ("P  /  X  /  U", "Flagi selekcji: Wybrane ⚑ (P) · Odrzucone ✕ (X) · Usuń flagę (U)"),
+            ("0 – 5", "Ocena gwiazdkowa bieżącego zdjęcia (0..5 ★)"),
+            ("Kółko nad suwakiem", "Precyzyjna korekta ±2 bez odrywania wzroku od twarzy (Shift+kółko: ±10)"),
+            ("Przeciągnij nazwę suwaka", "Płynny scrubbing mikro-korekty (0,25× czułości myszy)"),
+            ("Klik w liczbę / Dwuklik", "Kliknięcie wartości pozwala wpisać dokładną liczbę; dwuklik zeruje suwak"),
+            ("Przeciągnij po Histogramie", "Bezpośrednia regulacja stref: Czernie · Cienie · Ekspozycja · Światła · Biele"),
+            ("Ctrl+Z / Ctrl+Y", "Cofnij / Ponów zmianę"),
+            ("Ctrl+Shift+C / Ctrl+Shift+V", "Selektywne Kopiuj ustawienia… / Wklej ustawienia"),
+            ("Ctrl+Shift+E / Ctrl+S", "Eksportuj jako… (TIFF/PNG 16-bit, ICC) / Szybki zapis"),
+        )
+        scroll.grid_columnconfigure(1, weight=1)
+        for idx, (k_txt, desc) in enumerate(items):
+            T.label(scroll, k_txt, 11, T.ACCENT, weight="bold", anchor="w").grid(row=idx, column=0, sticky="nw", padx=(10, 14), pady=4)
+            T.label(scroll, desc, 11, T.TEXT, anchor="w", justify="left", wraplength=330).grid(row=idx, column=1, sticky="w", pady=4)
+        row = ctk.CTkFrame(self, fg_color=T.BG)
+        row.pack(fill="x", padx=20, pady=10)
+        T.button(row, "Zamknij", self.destroy, accent=True, width=100).pack(side="right")
+
 
