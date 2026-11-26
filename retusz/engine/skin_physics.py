@@ -156,6 +156,153 @@ def chromophore_even_gain(rgb_q: np.ndarray, lab_q: np.ndarray, mask: np.ndarray
     return np.clip(g * mask[..., None], -0.35, 0.35).astype(np.float32)
 
 
+def mixed_light_face_mask(rgb_q: np.ndarray, mask: np.ndarray,
+                          faces_q: list, lms_q: list | None = None) -> np.ndarray:
+    """Anatomical face + neck skin mask resilient to extreme mixed lighting (e.g. half face chalk-white
+    flash where Cr ~ 128, half face red/magenta club LED where Cr > 190).
+    Uses YuNet face geometry, luminance-only background rejection, landmark eye/mouth exclusion, and
+    structure-guided edge refinement so both halves of a split-lit face are captured cleanly."""
+    H, W = rgb_q.shape[:2]
+    m_base = np.clip(mask.astype(np.float32), 0.0, 1.0) if mask is not None else np.zeros((H, W), np.float32)
+    if not faces_q:
+        return m_base
+
+    from .color import guided_refine_rgb
+    img = rgb_q.astype(np.float32)
+    # Effective luminance supporting both white-flash and red-LED skin
+    Y_eff = np.maximum(0.299 * img[..., 0] + 0.587 * img[..., 1] + 0.114 * img[..., 2],
+                       0.58 * img[..., 0] + 0.30 * img[..., 1] + 0.12 * img[..., 2])
+    anat = np.zeros((H, W), np.float32)
+    feat = np.zeros((H, W), np.float32)
+
+    for idx, f in enumerate(faces_q):
+        x, y, w, h = (float(v) for v in f[:4])
+        cx, cy = int(round(x + 0.5 * w)), int(round(y + 0.52 * h))
+        ell = np.zeros((H, W), np.uint8)
+        cv2.ellipse(ell, (cx, cy), (max(1, int(round(w * 0.48))), max(1, int(round(h * 0.58)))), 0, 0, 360, 1, -1)
+        cv2.ellipse(ell, (cx, int(round(y + 1.05 * h))),
+                    (max(1, int(round(w * 0.28))), max(1, int(round(h * 0.26)))), 0, 0, 360, 1, -1)
+
+        core = np.zeros((H, W), np.uint8)
+        cv2.ellipse(core, (cx, cy), (max(1, int(round(w * 0.36))), max(1, int(round(h * 0.40)))), 0, 0, 360, 1, -1)
+        cm = core > 0
+        if cm.sum() >= 16:
+            yc = Y_eff[cm]
+            clean = cm & (Y_eff >= np.percentile(yc, 22.0))
+            if clean.sum() < 10:
+                clean = cm
+            y_med = float(np.median(Y_eff[clean]))
+            y_lo = max(16.0, y_med * 0.40)
+            y_hi = min(255.0, max(y_med * 1.48, 248.0))
+            fm = ((ell > 0) & (Y_eff >= y_lo) & (Y_eff <= y_hi)).astype(np.float32)
+        else:
+            fm = (ell > 0).astype(np.float32)
+        anat = np.maximum(anat, fm)
+
+        # Exclude eyes and inner mouth so iris, sclera, and lips are not recoloured
+        pts = None
+        if lms_q is not None and idx < len(lms_q) and lms_q[idx] is not None:
+            pts = np.asarray(lms_q[idx], np.float32).reshape(-1, 2)
+        if pts is not None and len(pts) >= 5:
+            rx_e, ry_e = max(1, int(round(w * 0.12))), max(1, int(round(h * 0.08)))
+            for ep in (pts[0], pts[1]):
+                cv2.ellipse(feat, (int(round(ep[0])), int(round(ep[1]))), (rx_e, ry_e), 0, 0, 360, 0.9, -1)
+            mcx = int(round(0.5 * (pts[3][0] + pts[4][0])))
+            mcy = int(round(0.5 * (pts[3][1] + pts[4][1])))
+            rx_m = max(1, int(round(max(abs(pts[4][0] - pts[3][0]) * 0.55, w * 0.14))))
+            ry_m = max(1, int(round(h * 0.065)))
+            cv2.ellipse(feat, (mcx, mcy), (rx_m, ry_m), 0, 0, 360, 0.75, -1)
+
+    if feat.max() > 0:
+        feat = cv2.GaussianBlur(feat, (0, 0), max(1.0, max(W, H) * 0.008))
+        anat = anat * (1.0 - np.clip(feat, 0.0, 0.9))
+
+    # Feather and snap to structural luminance edges (bridges across chromatic light split on cheeks)
+    anat = cv2.GaussianBlur(anat, (0, 0), max(1.0, max(W, H) * 0.012))
+    r = max(2, int(max(W, H) * 0.012))
+    y_guide = np.repeat(np.clip(Y_eff / 255.0, 0.0, 1.0)[..., None], 3, axis=2).astype(np.float32)
+    anat = np.clip(guided_refine_rgb(y_guide, anat, r, 3e-3), 0.0, 1.0)
+    return np.clip(np.maximum(m_base, anat), 0.0, 1.0).astype(np.float32)
+
+
+def mixed_light_gain(rgb_q: np.ndarray, mask: np.ndarray, faces_q: list,
+                     amount: float, lms_q: list | None = None) -> np.ndarray:
+    """Dual-Illuminant Spatially-Varying Mixed-Light Portrait Solver (Hsu, Mertens, Paris & Durand,
+    SIGGRAPH 2008 adapted to perceptual OKLab / OKLCh skin locus):
+    Unifies split-lit faces (e.g. half chalk-white flash/window, half red/magenta ambient LED or tungsten)
+    toward a single healthy golden-peach skin tone (~52 deg OKLCh) while preserving 100 % of pore texture."""
+    H, W = rgb_q.shape[:2]
+    if amount <= 1e-4:
+        return np.zeros((H, W, 3), np.float32)
+    m = mixed_light_face_mask(rgb_q, mask, faces_q, lms_q=lms_q)
+    sk = m > 0.30
+    if int(sk.sum()) < 25:
+        return np.zeros((H, W, 3), np.float32)
+
+    amt = float(np.clip(amount, 0.0, 1.0))
+    cur = np.clip(rgb_q.astype(np.float32) / 255.0, 0.0, 1.0)
+    lin = TN.srgb_to_lin(cur)
+    ok = TN.lin_to_oklab(lin)
+    L, a, b = ok[..., 0], ok[..., 1], ok[..., 2]
+    C = np.hypot(a, b)
+    h = np.arctan2(b, a)
+
+    # 1. Estimate target healthy portrait skin chromaticity in OKLCh (~52 deg, C ~ 0.064)
+    h_canon = np.float32(np.radians(52.0))
+    c_canon = np.float32(0.064)
+    dh = np.arctan2(np.sin(h - h_canon), np.cos(h - h_canon))
+    w_healthy = (
+        m
+        * np.exp(-(dh ** 2) / (2.0 * (0.32 ** 2)))
+        * np.exp(-((C - c_canon) ** 2) / (2.0 * (0.026 ** 2)))
+        * np.clip((L - 0.35) / 0.20, 0.0, 1.0)
+    ).astype(np.float32)
+
+    w_sum = float(w_healthy.sum())
+    m_sum = float(m.sum()) + 1e-5
+    f_healthy = w_sum / m_sum
+    a_canon = float(c_canon * np.cos(h_canon))
+    b_canon = float(c_canon * np.sin(h_canon))
+    if w_sum > 1.0:
+        a_h = float((w_healthy * a).sum() / w_sum)
+        b_h = float((w_healthy * b).sum() / w_sum)
+    else:
+        a_h, b_h = a_canon, b_canon
+
+    # When the face is heavily polluted by split white/red lighting (low f_healthy), anchor strongly to 52 deg locus
+    beta = float(np.clip(1.0 - 1.5 * f_healthy, 0.32, 1.0))
+    a_target = np.float32((1.0 - beta) * a_h + beta * a_canon)
+    b_target = np.float32((1.0 - beta) * b_h + beta * b_canon)
+
+    # 2. Multi-scale spatially-varying illuminant field (separates local split lighting from fine pores)
+    fw = float(np.median([f[2] for f in faces_q])) if faces_q else W / 3.0
+    sig1 = max(1.2, fw / 18.0)
+    sig2 = max(2.5, fw / 6.0)
+    den1 = cv2.GaussianBlur(m, (0, 0), sig1) + 1e-4
+    den2 = cv2.GaussianBlur(m, (0, 0), sig2) + 1e-4
+
+    def _low_field(arr):
+        f1 = cv2.GaussianBlur(arr * m, (0, 0), sig1) / den1
+        f2 = cv2.GaussianBlur(arr * m, (0, 0), sig2) / den2
+        return (0.72 * f1 + 0.28 * f2).astype(np.float32)
+
+    L_low = _low_field(L)
+    a_low = _low_field(a)
+    b_low = _low_field(b)
+
+    # 3. Unify both halves of the face in OKLab chromaticity and balance split-lighting luminance disparity
+    a_new = a + amt * m * (a_target - a_low) - (0.65 * amt) * m * (a - a_low)
+    b_new = b + amt * m * (b_target - b_low) - (0.65 * amt) * m * (b - b_low)
+    L_med = float(np.clip(np.median(L[sk]), 0.56, 0.78))
+    L_new = np.clip(L + (0.58 * amt) * m * np.clip(L_med - L_low, -0.22, 0.22), 0.0, 1.0)
+
+    ok_new = np.stack([L_new, a_new, b_new], axis=-1).astype(np.float32)
+    rgb_t = TN.lin_to_srgb(TN.oklab_to_lin_gamut(ok_new))
+
+    g = np.where(cur > 0.02, rgb_t / np.maximum(cur, 0.02) - 1.0, 0.0)
+    return np.clip(g * m[..., None], -0.68, 1.05).astype(np.float32)
+
+
 def _safe_skin_weights(work_rgb: np.ndarray, skin_mask: np.ndarray,
                        face_w: np.ndarray, lms_w: np.ndarray) -> np.ndarray:
     """Compute clean skin confidence weights at canonical face resolution (FACE_WORK_PX = 256):
