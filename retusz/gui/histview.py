@@ -1,4 +1,4 @@
-"""Lightroom Classic Histogram + OKLCh Skin Vectorscope (52° Skin Line) with:
+"""Studio Histogram + OKLCh Skin Vectorscope (52° Skin Line) with:
 - Interactive tonal-zone dragging (Czernie | Cienie | Ekspozycja | Światła | Biele)
 - Corner clipping warning triangles (J)
 - Circular colour-wheel OKLCh Skin Vectorscope matching the studio mockup.
@@ -56,6 +56,11 @@ class HistView(tk.Canvas):
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
         self.draw(None)
+
+    def set_dim(self, dim: bool) -> None:
+        """Skupienie (L): przyciemnia tło i ramkę histogramu, by zdjęcie dominowało."""
+        self.configure(bg=T.DIM_PANEL if dim else T.PANEL,
+                       highlightbackground=T.DIM_BORDER if dim else T.BORDER)
 
     def _hw(self) -> int:
         return self.W - 96 if self.W >= 240 else self.W
@@ -145,7 +150,7 @@ class HistView(tk.Canvas):
                     self.create_text(0.5 * (x0 + x1), top + 7, text=f"◂ {zlbl} ▸", fill=T.ACCENT, font=(T.FAMILY, 8, "bold"))
                     break
 
-        # Subtle vertical zone dividers (Lightroom style)
+        # Subtle vertical zone dividers (studio style)
         for u_div in (0.16, 0.38, 0.62, 0.84):
             xd = pad + u_div * (hw - 2 * pad)
             self.create_line(xd, top + 2, xd, H - pad, fill="#26262C", width=1)

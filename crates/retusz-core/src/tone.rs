@@ -204,6 +204,39 @@ pub fn apply_skin_oklch(lin: [f32; 3], skin_cast: f32, skin_hue: f32) -> [f32; 3
     oklab_to_lin_gamut([l, c_new * h_new.cos(), c_new * h_new.sin()])
 }
 
+/// Dedicated OKLCh Skin Fill Light (`skin_fill` in `-1.0..1.0`).
+#[inline]
+pub fn apply_skin_fill_oklch(lin: [f32; 3], skin_fill: f32) -> [f32; 3] {
+    let sf = skin_fill.clamp(-1.0, 1.0);
+    if sf.abs() < 1e-5 {
+        return lin;
+    }
+    let ok = lin_to_oklab(lin);
+    let l = ok[0].clamp(0.0, 1.0);
+    let c = ok[1].hypot(ok[2]);
+    let h = ok[2].atan2(ok[1]);
+    let dh = (h - 48.0f32.to_radians()).sin().atan2((h - 48.0f32.to_radians()).cos());
+    let w_hue = (-(dh / 1.05).powi(4)).exp();
+    let w_dark = ((l - 0.20) / 0.11).clamp(0.0, 1.0);
+    let w_loc = w_dark * (0.35 + 0.65 * w_hue) * (c / 0.015).clamp(0.0, 1.0);
+    let (l_new, c_new) = if sf > 0.0 {
+        let t_hi = ((0.91 - l) / 0.32).clamp(0.0, 1.0);
+        let w_hi = t_hi * t_hi * (3.0 - 2.0 * t_hi);
+        let d = 0.175 * sf * w_loc * w_hi;
+        let room = (0.96 - l).max(1e-4);
+        let ln = (l + d.min(room * (1.0 - (-d / room).exp()))).clamp(0.0, 0.985);
+        let kc = (ln / l.max(0.20)).max(1.0).powf(0.50).clamp(1.0, 1.20);
+        let hi_tame = 1.0 - 0.35 * ((c - 0.095) / 0.055).clamp(0.0, 1.0);
+        (ln, c * (1.0 + (kc - 1.0) * hi_tame))
+    } else {
+        let w_neg = w_loc * ((l - 0.28) / 0.42).clamp(0.0, 1.0).powf(1.10) * (1.0 - l.powi(12));
+        let ln = (l + 0.18 * sf * w_neg).clamp(0.0, 1.0);
+        let c_rec = 1.0 + 0.08 * (-sf) * w_neg * ((0.09 - c) / 0.06).clamp(0.0, 1.0);
+        (ln, c * c_rec)
+    };
+    oklab_to_lin_gamut([l_new, c_new * h.cos(), c_new * h.sin()])
+}
+
 /// Halo-free mid-tone local contrast (Clarity, `-1.0..+1.0`) via Guided Filter on CIELAB `L*`.
 /// Returns a relative luminance gain map `g` (`w * h`) for linear light: `L_lin_out = L_lin * (1 + g)`.
 pub fn clarity_gain(rgb8: &[u8], w: usize, h: usize, skin_mask: Option<&[f32]>, clarity: f32) -> Vec<f32> {

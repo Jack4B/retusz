@@ -119,7 +119,7 @@ def apply_exposure_lin(lin, ev: float, knee: float = 0.82):
 def apply_tone_lin(lin, contrast: float = 0.0, highlights: float = 0.0, shadows: float = 0.0,
                    whites: float = 0.0, blacks: float = 0.0, brightness: float = 0.0, dehaze: float = 0.0):
     """Perceptual tone controls in OKLab L: monotonic S-curve contrast around 18 % grey (L=0.58),
-    Capture One style midtone brightness (pinned at black 0 and white 1), atmospheric dehaze,
+    studio midtone brightness (pinned at black 0 and white 1), atmospheric dehaze,
     mid-shadow/mid-highlight recovery, and black/white endpoint controls. Constant-hue gamut clipped."""
     if not (contrast or highlights or shadows or whites or blacks or brightness or dehaze):
         return np.asarray(lin, np.float32)
@@ -127,7 +127,7 @@ def apply_tone_lin(lin, contrast: float = 0.0, highlights: float = 0.0, shadows:
     L = np.clip(ok[..., 0], 0.0, 1.0)
     dL = np.zeros_like(L)
     if brightness:
-        # Capture One midtone brightness: smooth bell pinned at L=0 and L=1
+        # Midtone brightness: smooth bell pinned at L=0 and L=1
         dL += np.float32(brightness * 0.34) * L * (1.0 - L) * (1.15 - 0.30 * L)
     if dehaze:
         # Atmospheric veil removal: deepens hazy shadows/midtones while keeping pure white clean
@@ -201,6 +201,50 @@ def apply_skin_oklch(lin, skin_cast: float = 0.0, skin_hue: float = 0.0):
     ok_out[..., 0] = L
     ok_out[..., 1] = C_new * np.cos(h_new)
     ok_out[..., 2] = C_new * np.sin(h_new)
+    return oklab_to_lin_gamut(ok_out)
+
+
+def apply_skin_fill_oklch(lin, skin_fill: float = 0.0):
+    """Dedicated Skin Fill Light ('Dopełnienie skóry', -1..1) in OKLCh inside the guided skin LUT:
+    - Positive (0..1): acts like a soft silver/warm studio reflector exclusively on skin — lifts shadowed
+      and midtone skin while protecting dark pupils/eyelashes (L <= 0.20), rolling off smoothly below L_max=0.95
+      so bright forehead highlights never clip, and scaling chroma (L_new/L)^0.50 so lifted skin never turns grey.
+    - Negative (-1..0): gently calms harsh on-camera flash skin highlights back into natural midtones."""
+    sf = float(np.clip(skin_fill, -1.0, 1.0))
+    if abs(sf) < 1e-5:
+        return np.asarray(lin, np.float32)
+    ok = lin_to_oklab(np.clip(lin, 0.0, 1.0))
+    L = np.clip(ok[..., 0], 0.0, 1.0)
+    a, b = ok[..., 1], ok[..., 2]
+    C = np.hypot(a, b)
+    h = np.arctan2(b, a)
+
+    # Protect black pupils, eyelashes, mascara & dark brows (OKLab L <= 0.20 corresponds to sRGB <= 26)
+    w_dark_prot = np.clip((L - 0.20) / 0.11, 0.0, 1.0)
+    dh_skin = np.arctan2(np.sin(h - np.radians(48.0)), np.cos(h - np.radians(48.0)))
+    w_hue = np.exp(-((dh_skin / 1.05) ** 4)).astype(np.float32)
+    w_loc = (w_dark_prot * (0.35 + 0.65 * w_hue)).astype(np.float32)
+
+    if sf > 0.0:
+        t_hi = np.clip((0.91 - L) / 0.32, 0.0, 1.0)
+        w_hi = t_hi * t_hi * (3.0 - 2.0 * t_hi)
+        d = np.float32(0.175 * sf) * w_loc * w_hi
+        room = np.maximum(0.96 - L, 1e-4)
+        L_new = np.clip(L + np.minimum(d, room * (1.0 - np.exp(-d / room))), 0.0, 0.985)
+        ratio_l = L_new / np.maximum(L, 0.20)
+        k_c = np.clip(np.power(np.maximum(ratio_l, 1.0), 0.50), 1.0, 1.20)
+        hi_tame = 1.0 - 0.35 * np.clip((C - 0.095) / 0.055, 0.0, 1.0)
+        C_new = C * (1.0 + (k_c - 1.0) * hi_tame)
+    else:
+        w_neg = w_loc * (np.clip((L - 0.28) / 0.42, 0.0, 1.0) ** 1.10) * (1.0 - (L ** 12))
+        L_new = np.clip(L + np.float32(0.18 * sf) * w_neg, 0.0, 1.0)
+        c_rec = 1.0 + np.float32(0.08 * (-sf)) * w_neg * np.clip((0.09 - C) / 0.06, 0.0, 1.0)
+        C_new = C * c_rec
+
+    ok_out = np.empty_like(ok)
+    ok_out[..., 0] = L_new.astype(np.float32)
+    ok_out[..., 1] = (C_new * np.cos(h)).astype(np.float32)
+    ok_out[..., 2] = (C_new * np.sin(h)).astype(np.float32)
     return oklab_to_lin_gamut(ok_out)
 
 
@@ -486,6 +530,10 @@ def auto_tone_params(rgb: np.ndarray, faces_n=()) -> dict:
         "blacks": round(blacks, 2),
         "vibrance": round(vibrance, 2),
     }
+    if face_L_ok is not None and not is_low_key and (bg_p88 - face_L_ok > 0.18) and face_L_ok < 0.62:
+        sf_auto = float(np.clip((bg_p88 - face_L_ok - 0.14) * 1.35, 0.0, 0.65))
+        if sf_auto > 0.05:
+            res["skin_fill"] = round(sf_auto, 2)
     if mixed_light_score > 0.05:
         res["mixed_light"] = round(mixed_light_score, 2)
     return res

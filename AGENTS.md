@@ -3,9 +3,9 @@
 Read this before changing anything. (Claude Code: `CLAUDE.md` points here.)
 
 ## Project
-Retusz is a free MIT-licensed Windows desktop app for portrait photographers (Polish UI): Lightroom Classic
-1-column UX, standalone OKLab/OKLCh studio develop, ColorChecker 24 calibration, colour match to single or
-pooled references (wzorce), Dodge & Burn v2, 2-axis Plastyka 3D, mixed-light LED skin unification,
+Retusz is a free MIT-licensed Windows desktop app for portrait photographers (Polish UI): collapsible
+1-column studio UX, standalone OKLab/OKLCh studio develop, ColorChecker 24 calibration, colour match to single or
+pooled references (wzorce), Dodge & Burn v2, 2-axis Plastyka 3D, Skin Fill Light, mixed-light LED skin unification,
 pore-preserving healing brush, batch with per-photo overrides, 16-bit TIFF/PNG & ICC export, RAW, and
 transfer of grading from a low-res AI version onto the full-res original.
 Stack: Python 3.11+ (CustomTkinter, OpenCV + OpenCL `cv2.ocl`, NumPy, numba, onnxruntime(-directml),

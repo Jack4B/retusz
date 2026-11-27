@@ -26,10 +26,11 @@ def test_license_consistency_and_model_sha256_gate():
     lic = (REPO_ROOT / "LICENSE").read_text(encoding="utf-8")
     assert "MIT License" in lic and "Jack4B" in lic
 
+    import retusz
     pyproj = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     cargo = tomllib.loads((REPO_ROOT / "Cargo.toml").read_text(encoding="utf-8"))
-    assert pyproj["project"]["version"] == "0.9.0"
-    assert cargo["workspace"]["package"]["version"] == "0.9.0"
+    assert pyproj["project"]["version"] == retusz.__version__
+    assert cargo["workspace"]["package"]["version"] == retusz.__version__
     lic_val = pyproj["project"]["license"]
     lic_str = lic_val.get("text", "") if isinstance(lic_val, dict) else str(lic_val)
     assert "MIT" in lic_str and "Proprietary" not in lic_str

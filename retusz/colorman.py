@@ -1,6 +1,6 @@
 """Colour management (LittleCMS via Pillow ImageCms).
 
-Working space = the source photo's own profile (e.g. AdobeRGB from Lightroom). The reference is
+Working space = the source photo's own profile (e.g. embedded AdobeRGB). The reference is
 converted into that space before analysis, the preview is converted from it to the monitor profile
 for display, and the export either keeps it or converts to sRGB / AdobeRGB / Display P3."""
 from __future__ import annotations

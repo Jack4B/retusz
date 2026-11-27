@@ -4,7 +4,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 from . import theme as T
 from .. import models, export as EX, colorman as CM
-from ..settings import DEVICES
+from ..settings import DEVICES, DEFAULT_VIEWS
 from ..engine import device
 
 class _Dialog(ctk.CTkToplevel):
@@ -66,7 +66,7 @@ class ModelDialog(_Dialog):
 class SettingsDialog(_Dialog):
     """Ustawienia: Ogólne (podgląd, silnik, urządzenie, model) and Eksport (Format, JPG, profil, DPI, rozmiar, wyostrzanie, metadane)."""
     def __init__(self, master, settings, on_save):
-        super().__init__(master, "Ustawienia", 560, 700); self.s = settings; self.on_save = on_save
+        super().__init__(master, "Ustawienia", 580, 780); self.s = settings; self.on_save = on_save
         row_b = ctk.CTkFrame(self, fg_color=T.BG); row_b.pack(side="bottom", fill="x", padx=20, pady=(6, 14))
         T.button(row_b, "Zapisz", self.save, accent=True).pack(side="right")
         T.button(row_b, "Anuluj", self.destroy).pack(side="right", padx=8)
@@ -107,6 +107,14 @@ class SettingsDialog(_Dialog):
         self._lbl(g, "Silnik", r); self.meth = self._menu(g, list(models.METHODS.values()), models.METHODS.get(s.method, models.METHODS["ai"]), r); r += 1
         self._lbl(g, "Obliczenia AI", r); self.dev = self._menu(g, list(DEVICES.values()), DEVICES.get(s.device, DEVICES["auto"]), r); r += 1
         self.dev_lbl = T.label(g, device.summary(), 11, T.MUTED, justify="left"); self.dev_lbl.grid(row=r, column=1, columnspan=2, sticky="w"); r += 1
+        self._lbl(g, "Karta graficzna", r)
+        ob = ctk.CTkFrame(g, fg_color=T.BG); ob.grid(row=r, column=1, columnspan=2, sticky="w", pady=5); r += 1
+        self.ocl_btn = T.button(ob, "Testuj OpenCL", self.test_opencl, width=130); self.ocl_btn.pack(side="left")
+        self.ocl_lbl = T.label(g, device.ocl_status_line(), 11, T.MUTED, justify="left", wraplength=360)
+        self.ocl_lbl.grid(row=r, column=1, columnspan=2, sticky="w"); r += 1
+        self._lbl(g, "Domyślny widok", r)
+        self.view = self._menu(g, list(DEFAULT_VIEWS.values()), DEFAULT_VIEWS.get(s.default_view, DEFAULT_VIEWS["auto"]), r); r += 1
+        T.label(g, "widok zostaje przy przechodzeniu do kolejnych zdjęć", 11, T.MUTED).grid(row=r, column=1, columnspan=2, sticky="w"); r += 1
         self._lbl(g, "Model AI", r); self.model_lbl = T.label(g, "", 12, T.MUTED); self.model_lbl.grid(row=r, column=1, sticky="w"); r += 1
         mb = ctk.CTkFrame(g, fg_color=T.BG); mb.grid(row=r, column=1, columnspan=2, sticky="w"); r += 1
         T.button(mb, "Pobierz model", self.download, width=130).pack(side="left")
@@ -155,6 +163,25 @@ class SettingsDialog(_Dialog):
                            progress_color=T.ACCENT if active else T.BORDER,
                            button_color=T.ACCENT if active else T.MUTED)
 
+    def test_opencl(self):
+        """Live OpenCL GPU benchmark (Gaussian + Bilateral + WarpAffine, CPU vs UMat) in a worker thread."""
+        self.ocl_btn.configure(state="disabled", text="Testuję…")
+        self.ocl_lbl.configure(text="Pomiar CPU i OpenCL GPU (1600 px)…")
+        def work():
+            try:
+                res = device.ocl_benchmark(h=1067, w=1600)
+                txt = res.get("status_pl", "")
+            except Exception as e:  # noqa: BLE001 – benchmark must never crash the dialog
+                txt = f"Test OpenCL nieudany: {e}"
+            def done():
+                try:
+                    self.ocl_lbl.configure(text=txt)
+                    self.ocl_btn.configure(state="normal", text="Testuj OpenCL")
+                except Exception:
+                    pass
+            self.after(0, done)
+        threading.Thread(target=work, daemon=True).start()
+
     def _model_status(self):
         self.model_lbl.configure(text=("zainstalowany (119 MB)" if models.have_ai() else "nie pobrany · używany lekki model"))
 
@@ -179,6 +206,7 @@ class SettingsDialog(_Dialog):
         s.preview_side = int(self.prev.get().split()[0])
         s.method = inv(models.METHODS, self.meth.get()); s.show_mask = bool(self.mask.get())
         s.device = inv(DEVICES, self.dev.get())
+        s.default_view = inv(DEFAULT_VIEWS, self.view.get())
         o = EX.ExportOptions.from_dict({
             "format": inv(EX.FORMATS, self.fmt.get()),
             "quality": int(round(self.q.get())), "subsampling": self.sub.get(), "profile": inv(CM.OUTPUT_PROFILES, self.prof.get()),
@@ -329,9 +357,9 @@ COPY_GROUPS = (
         "shadow_tone", "midtone_tone", "highlight_tone", "grading_balance",
         "hsl_green", "hsl_blue", "hsl_hue", "hsl_sat", "hsl_lum"
     ), True),
-    ("portrait", "Portret, Skóra, Światło 3D i Światło mieszane", (
+    ("portrait", "Portret, Skóra, Dopełnienie, Światło 3D i mieszane", (
         "db", "plastic", "light_angle", "light_x", "light_y", "bg_exposure",
-        "skin_hue", "mixed_light", "skin_cast", "skin_even", "deshine", "blemish", "eyes_teeth"
+        "skin_hue", "skin_fill", "mixed_light", "skin_cast", "skin_even", "deshine", "blemish", "eyes_teeth"
     ), True),
     ("detail", "Detal, Ostrość, Przejrzystość i Winieta", (
         "sharpen_amount", "sharpen_mode", "texture", "clarity", "denoise", "dehaze", "vignette"
@@ -342,9 +370,9 @@ COPY_GROUPS = (
 
 
 class SelectiveCopyDialog(_Dialog):
-    """Lightroom Classic style 'Kopiuj ustawienia…' dialog with group checkboxes (crop unchecked by default)."""
+    """'Kopiuj ustawienia…' dialog with group checkboxes (crop unchecked by default)."""
     def __init__(self, master, on_copy):
-        super().__init__(master, "Kopiuj wybrane ustawienia (Lightroom Copy)", 470, 390)
+        super().__init__(master, "Kopiuj wybrane ustawienia", 470, 390)
         self.on_copy = on_copy
         T.label(self, "Wybierz grupy parametrów do skopiowania", 15, weight="bold").pack(anchor="w", padx=20, pady=(14, 4))
         T.label(self, "Kadr oraz lokalny pędzel nie są zaznaczone domyślnie, aby chronić kompozycję innych zdjęć.",
@@ -376,27 +404,30 @@ class SelectiveCopyDialog(_Dialog):
 
 
 class ShortcutsDialog(_Dialog):
-    """Lightroom Classic keyboard & mouse ergonomics cheat-sheet ('?')."""
+    """Keyboard & mouse ergonomics cheat-sheet ('?')."""
     def __init__(self, master):
-        super().__init__(master, "Skróty klawiszowe i ergonomia (Lightroom UX)", 560, 480)
+        super().__init__(master, "Skróty klawiszowe i ergonomia", 560, 480)
         T.label(self, "Skróty i szybka obsługa — Retusz Studio Pro", 15, weight="bold").pack(anchor="w", padx=20, pady=(14, 6))
         scroll = ctk.CTkScrollableFrame(self, fg_color=T.CARD, corner_radius=8)
         scroll.pack(fill="both", expand=True, padx=20, pady=4)
         items = (
             ("G  /  D  /  Y", "Moduł Biblioteka (G) · Edycja (D) · Widok Obok siebie Przed|Po (Y)"),
             ("\\  (backslash)", "Szybkie przełączenie Przed / Po na głównym podglądzie"),
-            ("F6", "Pokaż / Ukryj boczny pasek miniatur serii (maksymalne miejsce na portret)"),
+            ("F6", "Pokaż / Ukryj dolną karuzelę zdjęć serii"),
+            ("L", "Skupienie: przyciemnij panele · ukryj panele · normalnie (cyklicznie)"),
+            ("Tab", "Tylko zdjęcie — ukryj / pokaż wszystkie panele (Esc — powrót)"),
+            ("Ctrl+Shift+R", "Czysty oryginał 0% — wszystkie korekty jak po wczytaniu"),
             ("R lub C", "Narzędzie Kadr i Prostowanie (Enter / Esc — zamknij szufladę)"),
             ("Q", "Pędzel Usuń / Popraw (inpainting + transfer prawdziwej tekstury porów)"),
             ("K", "Pędzel lokalny Dodge & Burn ([ / ] lub Alt+kółko — zmiana rozmiaru)"),
-            ("W  /  M  /  J", "Pipeta balansu bieli (W) · Diagnostyka Maska AI (M) · Przepalenia i cienie (J)"),
+            ("W  /  M  /  J", "Pipeta balansu bieli (W) · Maska AI: podgląd i pędzel + Dodaj / − Usuń (M) · Przepalenia (J)"),
             ("P  /  X  /  U", "Flagi selekcji: Wybrane ⚑ (P) · Odrzucone ✕ (X) · Usuń flagę (U)"),
             ("0 – 5", "Ocena gwiazdkowa bieżącego zdjęcia (0..5 ★)"),
             ("Kółko nad suwakiem", "Precyzyjna korekta ±2 bez odrywania wzroku od twarzy (Shift+kółko: ±10)"),
             ("Przeciągnij nazwę suwaka", "Płynny scrubbing mikro-korekty (0,25× czułości myszy)"),
             ("Klik w liczbę / Dwuklik", "Kliknięcie wartości pozwala wpisać dokładną liczbę; dwuklik zeruje suwak"),
             ("Przeciągnij po Histogramie", "Bezpośrednia regulacja stref: Czernie · Cienie · Ekspozycja · Światła · Biele"),
-            ("Ctrl+Z / Ctrl+Y", "Cofnij / Ponów zmianę"),
+            ("Ctrl+Z / Ctrl+Y", "Cofnij / Ponów zmianę (lista »Historia zmian« — klik = skok do etapu)"),
             ("Ctrl+Shift+C / Ctrl+Shift+V", "Selektywne Kopiuj ustawienia… / Wklej ustawienia"),
             ("Ctrl+Shift+E / Ctrl+S", "Eksportuj jako… (TIFF/PNG 16-bit, ICC) / Szybki zapis"),
         )
