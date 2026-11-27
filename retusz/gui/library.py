@@ -1,4 +1,4 @@
-"""Moduł Biblioteka (G) w stylu Adobe Lightroom Classic / Capture One:
+"""Moduł Biblioteka (G) w układzie studyjnym:
 - Lewy panel: Drzewo Folderów Roboczych (automatyczne wykrywanie folderów i podfolderów ze zdjęciami + licznik zdjęć)
   oraz Kolekcje Smart (Wszystkie, Wybrane ★, Własny wzorzec 🎯, Edytowane ●)
 - Środkowa siatka kart (Contact Sheet): każde zdjęcie posiada bezpośredni przycisk „🎯 Wzorzec…” do przypisania
@@ -46,12 +46,12 @@ class LibraryView(ctk.CTkFrame):
         T.button(bar, "Eksportuj jako…", self.app.open_export_as, accent=True, width=128).pack(side="right")
         T.button(bar, "Przejdź do Edycji (D)", self.app.hide_library, accent=True, width=152).pack(side="right", padx=6)
 
-        # Body: 3-pane Lightroom Library layout:
+        # Body: 3-pane studio Library layout:
         # Left = Folder Tree & Collections | Center = Contact-Sheet Grid | Right = Reference Pool & Batch Inspector
         body = ctk.CTkFrame(self, fg_color=T.BG)
         body.pack(fill="both", expand=True, padx=12, pady=(0, 8))
 
-        # ---- Left Pane: Lightroom Folder Tree & Workspace Navigator ----
+        # ---- Left Pane: Folder Tree & Workspace Navigator ----
         left = ctk.CTkFrame(body, fg_color=T.CARD, width=228, corner_radius=10, border_width=1, border_color=T.BORDER)
         left.pack(side="left", fill="y", padx=(0, 10))
         left.pack_propagate(False)

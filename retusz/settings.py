@@ -1,4 +1,4 @@
-"""App settings (%LOCALAPPDATA%\\Retusz\\settings.json)."""
+"""App settings (%LOCALAPPDATA%\\Retusz\\settings.json). Author: Jack4B."""
 from __future__ import annotations
 import json
 from dataclasses import dataclass, asdict, fields, field
@@ -6,11 +6,20 @@ from .paths import data_dir
 from .export import ExportOptions
 
 DEVICES = {
-    "auto": "Automatycznie (DirectML + OpenCL)",
-    "gpu": "Karta graficzna / iGPU (DirectML + OpenCL)",
-    "ocl": "Procesor + OpenCV OpenCL (Intel iGPU)",
+    "auto": "Automatycznie (OpenCL GPU + DirectML)",
+    "ocl": "Karta graficzna OpenCL (Intel / AMD / NVIDIA) + CPU",
+    "gpu": "Karta graficzna DirectML + OpenCL",
     "cpu": "Tylko procesor (CPU)",
 }
+
+DEFAULT_VIEWS = {
+    "auto": "Automatycznie (Z wzorcem gdy aktywny)",
+    "Wynik": "Pojedynczy (Wynik)",
+    "Przed | Po": "Podwójny (Przed | Po)",
+    "Z wzorcem": "Potrójny (Z wzorcem)",
+    "Podział": "Podział (kurtyna Przed/Po)",
+}
+
 
 @dataclass
 class Settings:
@@ -22,6 +31,8 @@ class Settings:
     asked_download: bool = False
     last_folder: str = ""
     device: str = "auto"
+    default_view: str = "auto"
+    open_panels: list[str] = field(default_factory=lambda: ["Podstawowe", "Portret 3D"])
     export: dict = field(default_factory=dict)
 
     @classmethod
@@ -32,8 +43,14 @@ class Settings:
         except (OSError, ValueError, TypeError):
             s = cls()
         s.jpg_quality = max(60, min(100, int(s.jpg_quality)))
-        if s.device not in DEVICES: s.device = "auto"
-        if not isinstance(s.export, dict) or not s.export: s.export = {"quality": s.jpg_quality}
+        if s.device not in DEVICES:
+            s.device = "auto"
+        if s.default_view not in DEFAULT_VIEWS:
+            s.default_view = "auto"
+        if not isinstance(s.open_panels, list) or not s.open_panels:
+            s.open_panels = ["Podstawowe", "Portret 3D"]
+        if not isinstance(s.export, dict) or not s.export:
+            s.export = {"quality": s.jpg_quality}
         s.export = ExportOptions.from_dict(s.export).to_dict()
         return s
 

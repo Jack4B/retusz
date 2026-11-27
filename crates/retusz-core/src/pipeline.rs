@@ -9,7 +9,7 @@ use crate::geometry::clamp_crop;
 use crate::params::Params;
 use crate::relight::{relight_gain, subject_mask};
 use crate::tone::{
-    apply_color_oklab, apply_exposure_lin, apply_skin_oklch, apply_tone_lin, clarity_gain,
+    apply_color_oklab, apply_exposure_lin, apply_skin_fill_oklch, apply_skin_oklch, apply_tone_lin, clarity_gain,
 };
 use crate::wb::apply_bradford01;
 use rayon::prelude::*;
@@ -100,6 +100,9 @@ pub fn build_studio_lut(
             params.whites,
             params.blacks,
         );
+        if params.skin_fill.abs() > 1e-5 {
+            lin = apply_skin_fill_oklch(lin, params.skin_fill);
+        }
         if params.skin_cast.abs() > 1e-5 || params.skin_hue.abs() > 1e-5 {
             lin = apply_skin_oklch(lin, params.skin_cast, params.skin_hue);
         }

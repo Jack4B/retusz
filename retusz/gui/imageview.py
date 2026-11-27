@@ -21,6 +21,10 @@ class ImageView(tk.Canvas):
         self.on_view_change = None; self.on_redraw = None
         self.bind("<Configure>", lambda e: self.redraw())
 
+    def set_dim(self, dim: bool) -> None:
+        self.configure(bg=T.DIM_CANVAS if dim else T.PANEL,
+                       highlightbackground=T.DIM_BORDER if dim else T.BORDER)
+
     # ----- content -----
     def set_image(self, rgb, icc=None, full_wh=None, keep_view=True):
         self.rgb = rgb; self.icc = icc; self.full_wh = full_wh; self._disp = None

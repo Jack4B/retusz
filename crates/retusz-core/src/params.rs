@@ -23,6 +23,8 @@ pub struct Params {
     #[serde(default = "default_one")]
     pub skin: f32,
     #[serde(default)]
+    pub skin_fill: f32,      // -1.0 .. +1.0 ('Dopełnienie skóry' OKLCh skin reflector fill light)
+    #[serde(default)]
     pub skin_even: f32,
     #[serde(default)]
     pub mixed_light: f32,    //  0.0 .. +1.0 ('Światło mieszane (LED)' Dual-Illuminant split-face unification)
@@ -45,7 +47,7 @@ pub struct Params {
     #[serde(default)]
     pub contrast: f32,       // -1.0 .. +1.0
     #[serde(default)]
-    pub brightness: f32,     // -1.0 .. +1.0 ('Jasność / Półtony' Capture One midtone curve)
+    pub brightness: f32,     // -1.0 .. +1.0 ('Jasność / Półtony' midtone curve)
     #[serde(default)]
     pub dehaze: f32,         // -1.0 .. +1.0 ('Zamglenie / Dehaze' OKLab veil removal)
     #[serde(default)]
@@ -129,6 +131,7 @@ impl Default for Params {
         Self {
             strength: 1.0,
             skin: 1.0,
+            skin_fill: 0.0,
             skin_even: 0.0,
             mixed_light: 0.0,
             skin_cast: 0.0,

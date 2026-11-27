@@ -1,4 +1,4 @@
-"""Dark Lightroom Classic studio theme with neutral grey slider tracks and #F5A33B warm accent."""
+"""Dark studio theme with neutral grey slider tracks and #F5A33B warm accent."""
 import sys
 import customtkinter as ctk
 
@@ -6,6 +6,10 @@ BG = "#161618"; CANVAS_BG = "#1B1B1E"; PANEL = "#1E1E22"; CARD = "#242428"; BORD
 TEXT = "#EAEAEF"; MUTED = "#9898A2"; ACCENT = "#F5A33B"; ACCENT_HOVER = "#E08E22"; ON_ACCENT = "#18181A"
 BTN = "#2C2C32"; BTN_HOVER = "#383840"; TRACK = "#383840"; TRACK_UNI = "#585864"
 THUMB = "#DCDCE2"
+
+# Skupienie / przyciemnione panele (L): ultra-ciemne panele, wyciszony tekst, czarne tło zdjęcia
+DIM_BG = "#08080A"; DIM_PANEL = "#0D0D10"; DIM_CARD = "#111115"; DIM_BORDER = "#1B1B20"
+DIM_TEXT = "#666672"; DIM_MUTED = "#50505A"; DIM_CANVAS = "#060608"
 
 FAMILY = "Segoe UI" if sys.platform == "win32" else ("SF Pro Text" if sys.platform == "darwin" else "DejaVu Sans")
 
@@ -29,7 +33,7 @@ def slider(master, from_, to, command=None, **kw):
                          fg_color=TRACK, **kw)
 
 def lr_slider(master, from_, to, command=None, **kw):
-    """Calm Adobe Lightroom Classic slider: neutral grey track (no bright orange bar on bipolar 0)
+    """Calm studio slider: neutral grey track (no bright orange bar on bipolar 0)
     and crisp silver circular thumb with warm amber hover."""
     bipolar = from_ < 0
     return ctk.CTkSlider(

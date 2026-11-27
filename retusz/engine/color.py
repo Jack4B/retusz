@@ -167,7 +167,8 @@ def guided_refine_rgb(I, p, r, eps=1e-3):
     """3-channel colour guided filter (He, Sun, Tang, ECCV 2010 / TPAMI 2013, eq. 14-16).
     I: float32 HxWx3 in 0..1, p: float32 HxW. Snaps p's edges to both luminance and chroma edges of I."""
     r = max(1, int(r)); k = (2*r + 1, 2*r + 1)
-    box = lambda x: cv2.boxFilter(x, -1, k)
+    from . import device as DEV
+    box = lambda x: DEV.ocl_box_filter(x, r)
     R, G, B = I[..., 0], I[..., 1], I[..., 2]
     mR, mG, mB, mp = box(R), box(G), box(B), box(p)
     vrr = box(R*R) - mR*mR + eps; vrg = box(R*G) - mR*mG; vrb = box(R*B) - mR*mB
@@ -184,12 +185,13 @@ def guided_refine_rgb(I, p, r, eps=1e-3):
 
 def fast_guided_rgb(I, p, r, eps=1e-3, s=4.0):
     """Fast 3-channel guided filter (He & Sun 2015): linear coefficients at 1/s resolution, applied at full-res."""
+    from . import device as DEV
     h, w = p.shape
     if s <= 1.05: return guided_refine_rgb(I, p, r, eps)
-    sw, sh = max(2, round(w/s)), max(2, round(h/s)); rs = max(1, round(r/s)); k = (2*rs + 1, 2*rs + 1)
-    box = lambda x: cv2.boxFilter(x, -1, k)
-    Is = cv2.resize(I, (sw, sh), interpolation=cv2.INTER_AREA)
-    ps = cv2.resize(p, (sw, sh), interpolation=cv2.INTER_AREA)
+    sw, sh = max(2, round(w/s)), max(2, round(h/s)); rs = max(1, round(r/s))
+    box = lambda x: DEV.ocl_box_filter(x, rs)
+    Is = DEV.ocl_resize(I, (sw, sh), interpolation=cv2.INTER_AREA)
+    ps = DEV.ocl_resize(p, (sw, sh), interpolation=cv2.INTER_AREA)
     R, G, B = Is[..., 0], Is[..., 1], Is[..., 2]
     mR, mG, mB, mp = box(R), box(G), box(B), box(ps)
     vrr = box(R*R) - mR*mR + eps; vrg = box(R*G) - mR*mG; vrb = box(R*B) - mR*mB
@@ -202,6 +204,6 @@ def fast_guided_rgb(I, p, r, eps=1e-3, s=4.0):
     aG = box((c01*crp + c11*cgp + c12*cbp)*inv)
     aB = box((c02*crp + c12*cgp + c22*cbp)*inv)
     b = box(mp - aR*mR - aG*mG - aB*mB)
-    up = lambda x: cv2.resize(x, (w, h), interpolation=cv2.INTER_LINEAR)
+    up = lambda x: DEV.ocl_resize(x, (w, h), interpolation=cv2.INTER_LINEAR)
     return (up(aR)*I[..., 0] + up(aG)*I[..., 1] + up(aB)*I[..., 2] + up(b)).astype(np.float32)
 

@@ -1,21 +1,40 @@
-# Retusz 0.9.0
+# Retusz 0.9.1
 
-Aplikacja na Windows: profesjonalny edytor portretowy z **minimalistycznym układem studyjnym Adobe Lightroom Classic (1 kolumna spokojnych, neutralnych suwaków, wyśrodkowany portret ze zwijanym paskiem serii `F6`, interaktywny Histogram ze strefami tonalnymi i kołowym Wektorskopem Skóry OKLCh 52°)**, modułami **Biblioteka (G)** i **Edycja (D)**, akceleracją **Intel iGPU OpenCV OpenCL (`cv2.ocl` / `UMat`) + DirectML**, **`★ Auto Ton AI v2` (kąt fototypu $\text{ITA}^\circ$ Chardon 1991)** i **`Auto WB v2` (Shades-of-Gray $p=6$)**, nieniszczącym pędzlem **`✦ Usuń / Popraw (Q)`** z transferem tekstury porów, **8-kanałowym Mikserem OKLCh HSL i 3-drożnym Color Gradingiem OKLab**, kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**, obsługą **wielu wzorców kolorystycznych w jednej serii**, ratowaniem **Światła mieszanego (LED / Błysk)**, dwuosiowym **Światłem 3D**, biofizyczną optyką skóry oraz oknem **Eksportuj jako… (TIFF/PNG 16-bit, WebP, JPG 4:4:4, ProPhoto RGB, Display P3, Adobe RGB, sRGB)**. Autor: Jack4B.
+Aplikacja na Windows: profesjonalny edytor portretowy ze **studyjnym układem pionowych, rozwijanych modułów edycji (`Podstawowe`, `Portret 3D`, `Kolor HSL`, `Detal`, `Wzorzec`), górnym menu studyjnym (`Plik ▾`, `Edycja ▾`, `Zdjęcie ▾`, `Widok ▾`), dolną poziomą karuzelą zdjęć (`F6`), trybem przyciemnienia paneli Skupienie (`L` / `Tab`), nazwaną interaktywną listą `Historia zmian`, szybkim resetem `Czyste 0%` (`Ctrl+Shift+R`), ręczną korektą `Maski AI (+ Dodaj / − Usuń)` (`M`) oraz suwakiem `Dopełnienie skóry` (`skin_fill`)**, modułami **Biblioteka (G)** i **Edycja (D)**, pełną akceleracją **OpenCV OpenCL GPU (`cv2.ocl` / `UMat`) + DirectML**, **`★ Auto Ton AI` (kąt fototypu $\text{ITA}^\circ$ Chardon 1991)** i **`Auto WB` (Shades-of-Gray $p=6$)**, nieniszczącym pędzlem **`✦ Usuń / Popraw (Q)`** z transferem tekstury porów, **8-kanałowym Mikserem OKLCh HSL i 3-drożnym Color Gradingiem OKLab**, kalibracją **ColorChecker Classic (24 pola + raport ΔE₀₀)**, obsługą **wielu wzorców kolorystycznych w jednej serii**, ratowaniem **Światła mieszanego (LED / Błysk)**, dwuosiowym **Światłem 3D**, biofizyczną optyką skóry oraz oknem **Eksportuj jako… (TIFF/PNG 16-bit, WebP, JPG 4:4:4, ProPhoto RGB, Display P3, Adobe RGB, sRGB)**. Autor: Jack4B.
 
 ## Kontrola jakości
 
 `tools/quality_gate.py` – bramka uruchamiana przed każdym wydaniem: porównuje wynik z wzorcem (LAB średnia/odchylenie, chroma i odcień skóry, kolorowość Hasler–Süsstrunk ≤ wzorzec +5%, przepalenia), sprawdza szwy/halo od Dodge&Burn i Plastyki 3D (próg szwu < 0,5 ΔL), identyczność (zdjęcie = wzorzec) oraz zgodność podglądu z eksportem (ΔE < 1). Tryb `--colorchecker` sprawdza detekcję i kalibrację 24 pól ColorChecker (średnie ΔE₀₀ < 1,2, skóra < 1,0, szarości < 0,8).
 
+### 0.9.1
+- **Rozwijane moduły edycji jeden pod drugim (Accordion) i rozbudowane menu studyjne** (`retusz/gui/app.py`, `settings.py`):
+  - wszystkie 5 grup parametrów (**`▾ Podstawowe`**, **`▾ Portret 3D`**, **`▸ Kolor HSL`**, **`▸ Detal`**, **`▸ Wzorzec`**) układa się pionowo jedna pod drugą w przewijanym prawym doku bez pustego miejsca pod suwakami — dowolne moduły mogą być rozwinięte jednocześnie (stan zapamiętywany w `settings.open_panels`), a każdy nagłówek ma własny przycisk podglądu bez modułu (**`👁`**) i zerowania modułu (**`↺`**);
+  - pełny górny pasek menu **`Plik ▾`**, **`Edycja ▾`**, **`Zdjęcie ▾`**, **`Widok ▾`** z nazwanym `Cofnij / Ponów`, kopiowaniem i synchronizacją serii, narzędziami lokalnymi, flagami, ocenami oraz przełącznikami widoku.
+- **Konfigurowalny widok domyślny i zapamiętywanie wybranego widoku między zdjęciami** (`retusz/settings.py`, `retusz/gui/dialogs.py`, `retusz/gui/app.py`):
+  - wybór **Domyślnego widoku** (`Automatycznie`, `Pojedynczy (Wynik)`, `Podwójny (Przed | Po)`, `Potrójny (Z wzorcem)`, `Podział`) w `Ustawienia → Ogólne` oraz bezpośrednio w menu `Widok ▾`;
+  - przechodzenie do kolejnych zdjęć (`◀ / ▶`, strzałki, klik na karuzeli) **nigdy nie przełącza z powrotem na widok potrójny `Z wzorcem`**, gdy fotograf wybrał pojedynczy `Wynik` lub `Przed | Po`.
+- **Ręczna korekta `Maski AI (+ Dodaj / − Usuń)` (`M`)** (`retusz/engine/pipeline.py:apply_mask_strokes`, `retusz/gui/app.py`):
+  - nieniszczący pędzel korekty maski skóry (`Params.mask_strokes` w `*.retusz.json`): **`+ Dodaj`** domalowuje pominięte obszary skóry (szyja, dłonie, cień) ze wspomaganiem chromatycznym na krawędziach, a **`− Usuń`** wymazuje niechciane elementy tła lub ubrań o zbliżonym kolorze.
+- **Interaktywna lista `Historia zmian` oraz szybki reset `Czyste 0%` (`Ctrl+Shift+R`)** (`retusz/gui/app.py`, `retusz/engine/pipeline.py:Params.clean_original`):
+  - przewijana lista **`Historia zmian`** na dole prawego doku pokazuje czytelne nazwy kolejnych etapów obróbki (np. `0. Wczytano zdjęcie`, `1. Ekspozycja +0,45 EV`, `2. Dopełnienie skóry +35`, `3. Maska AI (− Usuń)`), podświetla aktualny etap i pozwala **1 kliknięciem przeskoczyć w tył lub w przód do dowolnego kroku**;
+  - przycisk **`Czyste 0%`** (`Ctrl+Shift+R`) natychmiast przywraca czysty stan zdjęcia prosto z wczytania (wszystkie suwaki `0%`, bez D&B, Plastyki 3D, winiety, kadru i pędzli).
+- **Dolna pozioma karuzela zdjęć (`F6` / `▣ Karuzela`) oraz tryb zaciemnienia paneli `◐ Skupienie` (`L` / `Tab`)** (`retusz/gui/app.py`, `theme.py`, `histview.py`, `imageview.py`):
+  - pasek miniatur serii przeniesiony z lewego boku do wygodnej **poziomej karuzeli na dole pod zdjęciem** (`F6`);
+  - przycisk **`◐ Skupienie` (`L`)** przyciemnia wszystkie panele wokół kadru do głębokiej czerni studyjnej, zostawiając aktywne suwaki i eksponując fotografię na pierwszym planie; klawisz **`Tab`** chowa wszystkie panele (tryb samego zdjęcia).
+- **Suwak `Dopełnienie skóry` (`skin_fill`, `-100..+100`) i pełna akceleracja OpenCL GPU** (`retusz/engine/tone.py:apply_skin_fill_oklch`, `crates/retusz-core/src/tone.rs`, `retusz/engine/device.py`):
+  - selektywna wirtualna blenda w OKLCh działająca wyłącznie na cieniach i półtonach skóry (chroni ciemne źrenice, jasne czoło, teksturę porów oraz tło; wartości ujemne gaszą ostry błysk lampy; automatyczne wykrywanie zdjęć pod światło w `★ Auto Ton AI`);
+  - obniżony próg `UMAT_MIN_PIXELS = 150 000` oraz pełne wsparcie `cv2.UMat` OpenCL w rozmyciach Gaussa, filtrze pudełkowym i prowadzącym 3-kanałowym (`guided filter`), filtrze bilateralnym, dekonwolucji Richardsona–Lucy i prostowaniu kadru + przycisk **`Testuj OpenCL`** z pomiarem przyspieszenia na żywo w `Ustawienia → Ogólne`.
+
 ### 0.9.0
-- **Przebudowa UI i ergonomii pracy (UX) według makiety studyjnej Lightroom Classic** (`retusz/gui/app.py`, `theme.py`, `histview.py`, `dialogs.py`):
-  - **Minimalistyczny pasek górny**: złote menu **`Otwórz ▾`**, lista **`Presety ▾`**, wyśrodkowany przełącznik modułów **`Biblioteka (G) | Edycja (D) | Porównaj | Grading z AI`**, ściąga skrótów **`?`** oraz przyciski **`Zapisz`** i **`Eksportuj…`**;
-  - **Spokojne, neutralne suwaki (`T.lr_slider`) i wyśrodkowane płótno portretu**: szare prowadnice ze srebrnym kołowym uchwytem eliminują wizualny hałas pomarańczowych pasków na wyzerowanych suwakach dwubiegunowych; lewy pasek miniatur serii jest zwijany przyciskiem **`▣`** (`F6`);
-  - **5 przejrzystych zakładek Develop**: `Podstawowe`, `Portret 3D`, `Kolor HSL`, `Detal`, `Wzorzec` z przyciskami szybkiego podglądu bez aktywnej zakładki (**`👁`**) oraz zerowania samej zakładki (**`↺`**);
+- **Przebudowa UI i ergonomii pracy (UX) w układzie studyjnym** (`retusz/gui/app.py`, `theme.py`, `histview.py`, `dialogs.py`):
+  - **Minimalistyczny pasek górny**: menu plików, lista **`Presety ▾`**, wyśrodkowany przełącznik modułów **`Biblioteka (G) | Edycja (D) | Porównaj | Grading z AI`**, ściąga skrótów **`?`** oraz przyciski **`Zapisz`** i **`Eksportuj…`**;
+  - **Spokojne, neutralne suwaki i wyśrodkowane płótno portretu**: szare prowadnice ze srebrnym kołowym uchwytem eliminują wizualny hałas pomarańczowych pasków na wyzerowanych suwakach dwubiegunowych;
+  - **5 grup parametrów obróbki**: `Podstawowe`, `Portret 3D`, `Kolor HSL`, `Detal`, `Wzorzec` z przyciskami szybkiego podglądu bez grupy (**`👁`**) oraz zerowania samej grupy (**`↺`**);
   - **4-stopniowa ergonomia sterowania i interaktywny Histogram**: kółko myszy nad suwakiem (`±2`, `Shift`: `±10`), płynny *scrubbing* po nazwie suwaka, kliknięcie wartości liczbowej do wpisania z klawiatury, dwuklik zerujący oraz **przeciąganie stref tonalnych bezpośrednio na Histogramie** (`Czernie | Cienie | Ekspozycja | Światła | Biele`);
-  - **Selektywne kopiowanie ustawień (`Kopiuj…`, `Ctrl+Shift+C`)** z wyborem grup parametrów (kadr domyślnie odznaczony) oraz **flagi selekcji Lightroom (`Wybrane ⚑` klawisz `P`, `Odrzucone ✕` klawisz `X`, `U`)**.
-- **Akceleracja zintegrowanych kart Intel iGPU (OpenCV OpenCL `cv2.ocl` / `UMat`) oraz optymalizacja DirectML** (`retusz/engine/device.py`, `settings.py`, `detail.py`, `cli.py`):
-  - nowy tryb **`Procesor + OpenCV OpenCL (Intel iGPU)`** (`--device ocl`), przyspieszający filtry rozmycia Gaussa i skalowanie na dużych kadrach (`≥ 0,4 Mpx`) na układach zintegrowanych Intel UHD / Iris Xe / Arc przez `cv2.UMat` z automatycznym fallbackiem CPU;
-  - konfiguracja sesji ONNX Runtime DirectML pod współdzieloną pamięć iGPU (`enable_mem_pattern=False`, `ORT_SEQUENTIAL`, dwukrotna rozgrzewka shaderów DX12 przed pomiarem czasu).
+  - **Selektywne kopiowanie ustawień (`Kopiuj…`, `Ctrl+Shift+C`)** z wyborem grup parametrów (kadr domyślnie odznaczony) oraz **flagi selekcji (`Wybrane ⚑` klawisz `P`, `Odrzucone ✕` klawisz `X`, `U`)**.
+- **Akceleracja kart graficznych OpenCV OpenCL (`cv2.ocl` / `UMat`) oraz optymalizacja DirectML** (`retusz/engine/device.py`, `settings.py`, `detail.py`, `cli.py`):
+  - tryb **`Karta graficzna OpenCL + CPU`** (`--device ocl`), przyspieszający filtry OpenCV na układach zintegrowanych i dedykowanych przez `cv2.UMat` z automatycznym fallbackiem CPU;
+  - konfiguracja sesji ONNX Runtime DirectML pod współdzieloną pamięć GPU (`enable_mem_pattern=False`, `ORT_SEQUENTIAL`, dwukrotna rozgrzewka shaderów DX12 przed pomiarem czasu).
 - **`★ Auto Ton AI v2` z kątem fototypu karnacji $\text{ITA}^\circ$ (Chardon et al., 1991) oraz `Auto WB v2`** (`retusz/engine/tone.py`, `wb.py`):
   - jawne rozdzielenie skali CIE $L^*$ (`0..100`) i OKLab $L$ (`0..1`) oraz dobór docelowej jasności skóry na podstawie kąta typologii indywidualnej $\text{ITA}^\circ = \arctan((L^* - 50)/b^*)$, dzięki czemu ciemne karnacje i portrety *low-key* nie są sztucznie rozjaśniane;
   - jednoklikowy **`Auto WB`** oparty na algorytmie stałości barw *Shades-of-Gray* (norma Minkowskiego $p=6$, Finlayson & Trezzi 2004) z wykluczeniem wykrytych twarzy i pasma skóry (nie ochładza naturalnie ciepłej karnacji).
@@ -28,11 +47,11 @@ Aplikacja na Windows: profesjonalny edytor portretowy z **minimalistycznym ukła
 - **Spójność licencyjna MIT i weryfikacja kryptograficzna SHA-256 modeli ONNX** (`LICENSE`, `THIRD_PARTY_LICENSES.md`, `pyproject.toml`, `Cargo.toml`).
 
 ### 0.8.0
-- **Autentyczny układ Adobe Lightroom Classic — 1 kolumna szerokich suwaków i redukcja szumu wizualnego** (`retusz/gui/app.py`):
-  - **Jedna pionowa kolumna suwaków w stylu Lightroom Classic**: zastąpiono dwukolumnową siatkę wąskich suwaków czytelnym układem `[Etykieta po lewej] ─── [Szeroki suwak] ─── [Wartość po prawej]`;
+- **Układ jednokolumnowy — 1 kolumna szerokich suwaków i redukcja szumu wizualnego** (`retusz/gui/app.py`):
+  - **Jedna pionowa kolumna suwaków**: zastąpiono dwukolumnową siatkę wąskich suwaków czytelnym układem `[Etykieta po lewej] ─── [Szeroki suwak] ─── [Wartość po prawej]`;
   - **Subtelny pasek gradientu wyłącznie pod suwakami barwnymi** zamiast powtarzających się podpisów tekstowych pod każdym suwakiem;
-  - **Składana szuflada narzędzi lokalnych**: domyślnie zwinięta pod paskiem narzędzi pod histogramem — otwiera się po aktywowaniu pędzla lub kadrowania (`C`) i zamyka przyciskiem `Gotowe ✕`, `Enter`, `Esc` lub po przełączeniu zakładki;
-  - **Dolny pasek narzędzi pod zdjęciem (Lightroom Loupe Toolbar `T`)**: tryby widoku (`Wynik | Przed | Po | Podział | Z wzorcem`), `Przed/Po (\)`, ocena gwiazdkowa `0..5★` oraz zoom (`Dopasuj`, `1:1`, `%`).
+  - **Składana szuflada narzędzi lokalnych**: domyślnie zwinięta pod paskiem narzędzi pod histogramem — otwiera się po aktywowaniu pędzla lub kadrowania (`C`) i zamyka przyciskiem `Gotowe ✕`, `Enter`, `Esc`;
+  - **Dolny pasek narzędzi pod zdjęciem**: tryby widoku (`Wynik | Przed | Po | Podział | Z wzorcem`), `Przed/Po (\)`, ocena gwiazdkowa `0..5★` oraz zoom (`Dopasuj`, `1:1`, `%`).
 - **`★ Auto Ton AI` — jednoklikowy balans ekspozycji i rozpiętości tonalnej pod twarz** (`retusz/engine/tone.py:auto_tone_params`).
 - **Color Grading OKLab (Split Toning) i Selektywny Mikser HSL OKLCh z izolacją skóry** (`retusz/engine/tone.py:apply_color_grading_oklab`):
   - **`Ciepło cieni` (`shadow_tone`, `-100..+100`)**, **`Blask świateł` (`highlight_tone`, `-100..+100`)**, **`Zieleń (Plener)` (`hsl_green`)** oraz **`Błękit (Niebo/Biel)` (`hsl_blue`)** z ochroną pasma odcienia skóry ($50^\circ$ OKLCh).
@@ -41,7 +60,7 @@ Aplikacja na Windows: profesjonalny edytor portretowy z **minimalistycznym ukła
 - **Ulepszona detekcja wielu twarzy w okularach (`YuNet`)** (`retusz/engine/faces.py`).
 
 ### 0.7.0
-- **Układ interfejsu w stylu Adobe Lightroom / Capture One Pro (`Prawy Dok Inspektora`)** (`retusz/gui/app.py`):
+- **Układ interfejsu studyjnego (`Prawy Dok Inspektora`)** (`retusz/gui/app.py`):
   - przeniesienie wszystkich suwaków, histogramu, wektorskopu skóry i narzędzi lokalnych z dolnego paska do **Prawego Doku Inspektora** zwiększa pionową wysokość roboczą zdjęcia o ~40%;
   - podpowiedzi kierunkowe (`SLIDER_HINTS`) oraz panel podpowiedzi kontekstowych (`PRO_TIPS`).
 - **Dwuosiowe Światło 3D (`Lewo ↔ Prawo` oraz `Dół ↔ Góra`) i Separacja tła 3D (`bg_exposure`)** (`retusz/engine/relight.py`, `retusz/engine/pipeline.py`):
@@ -50,10 +69,10 @@ Aplikacja na Windows: profesjonalny edytor portretowy z **minimalistycznym ukła
 - **Wizualna diagnostyka pracy AI (`Maska AI (M)`) oraz import wybranych zdjęć z folderu** (`retusz/engine/histo.py`, `retusz/sidecar.py`, `retusz/gui/library.py`).
 
 ### 0.6.0
-- **Moduły `Biblioteka (G)` i `Edycja (D)` w stylu Lightroom / Capture One** (`retusz/gui/library.py`, `retusz/gui/app.py`):
+- **Moduły `Biblioteka (G)` i `Edycja (D)`** (`retusz/gui/library.py`, `retusz/gui/app.py`):
   - **Biblioteka (`G`)**: widok siatki miniatur serii (Contact Sheet) z filtrowaniem, oceną gwiazdkową `1–5 ★`, wielokrotnym zaznaczaniem do grupowego przypisywania wzorców lub presetów oraz przejściem do **Edycji (`D`)**;
   - **Wiele wzorców kolorystycznych w jednej serii (`reference_path`, `reference_bank`)** (`retusz/sidecar.py`, `retusz/batch.py`).
-- **Zakładka `Detal` oraz parametry klasy Capture One / Lightroom** (`retusz/engine/detail.py`, `retusz/engine/tone.py`):
+- **Sekcja `Detal` oraz zaawansowane parametry wywołania** (`retusz/engine/detail.py`, `retusz/engine/tone.py`):
   - **4 tryby wyostrzania na żywo (`sharpen_mode` + `Ostrość`)**: *Portret (ochrona skóry — morfologiczny Clamped USM ograniczający obwódki)*, *Dekonwolucja RL (obiektyw)*, *Krawędzie (Clamped USM)*, *Miękki blask (Soft Focus)*;
   - **Struktura (`texture`)**, **Odszumianie (`denoise`)**, **Jasność / Półtony (`brightness`)** oraz **Zamglenie (`dehaze`)**.
 - **Okno `Eksportuj jako… (Ctrl+Shift+E)` — 6 formatów i 5 przestrzeni barwnych ICC** (`retusz/export.py`, `retusz/colorman.py`, `retusz/gui/dialogs.py`).
@@ -180,7 +199,7 @@ i często lekko przycięte, przesunięte albo obrócone. Przycisk **Grading z AI
 2. Retusz sam nakłada wersję AI na oryginał (SIFT + ECC, przy lekkich deformacjach przepływ optyczny);
    błąd dopasowania jest pokazany w px.
 3. Z wersji AI brana jest tylko barwa i światło (lokalna transformacja koloru, *bilateral guided upsampling*),
-   a szczegóły i ostrość zostają z oryginału – jak warstwa w trybie **Kolor** i częściowo **Jasność** w Photoshopie.
+   a szczegóły i ostrość zostają z oryginału – z pełnym zachowaniem mikro-tekstury matrycy.
    - **Kolor** i **Jasność (światło)** – siła przeniesienia barw i nowego światła (0–100%).
    - **Chroń miejsca zmienione przez AI** – gdzie AI dorysowało lub usunęło treść, zostaje oryginał
      (**Pokaż mapę zmian** pokazuje te miejsca na czerwono).

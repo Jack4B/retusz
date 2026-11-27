@@ -24,7 +24,7 @@ class Params:
     skin: float = 1.0
     exposure: float = 0.0           # 'Ekspozycja' -2..2 EV (linear light + filmic shoulder)
     contrast: float = 0.0           # 'Kontrast' -1..1 (OKLab S-curve)
-    brightness: float = 0.0         # 'Jasność (Półtony)' -1..1 (Capture One midtone transfer in OKLab L)
+    brightness: float = 0.0         # 'Jasność (Półtony)' -1..1 (midtone transfer curve in OKLab L)
     dehaze: float = 0.0             # 'Zamglenie (Dehaze)' -1..1 (OKLab atmospheric veil removal)
     shadows: float = 0.0
     highlights: float = 0.0
@@ -45,7 +45,7 @@ class Params:
     saturation: float = 0.0         # 'Nasycenie' -1..1
     vibrance: float = 0.0           # 'Jaskrawość' -1..1 (OKLab, boosts dull colours, spares skin)
     shadow_tone: float = 0.0        # 'Ciepło cieni' -1..1 (OKLab Split Toning: cool blue <-> warm amber shadows)
-    midtone_tone: float = 0.0       # 'Barwa półtonów' -1..1 (OKLab 3-Way Color Grading midtone tint)
+    midtone_tone: float = 0.0       # 'Ton półtonów' -1..1 (OKLab 3-Way Color Grading midtone tint)
     highlight_tone: float = 0.0     # 'Blask świateł' -1..1 (OKLab Split Toning: cool <-> golden hour highlights)
     grading_balance: float = 0.0    # 'Balans cieni/świateł' -1..1 (Color Grading shadow/highlight crossover pivot)
     hsl_green: float = 0.0          # 'Zieleń (Plener)' -1..1 (OKLCh selective foliage green control, spares skin)
@@ -53,6 +53,7 @@ class Params:
     hsl_hue: list = field(default_factory=lambda: [0.0] * 8)  # 8-channel OKLCh Hue shifts (-1..1)
     hsl_sat: list = field(default_factory=lambda: [0.0] * 8)  # 8-channel OKLCh Saturation shifts (-1..1)
     hsl_lum: list = field(default_factory=lambda: [0.0] * 8)  # 8-channel OKLCh Luminance shifts (-1..1)
+    skin_fill: float = 0.0          # 'Dopełnienie skóry' -1..1 (Dedicated skin reflector fill light in OKLCh)
     skin_even: float = 0.3          # 'Równanie skóry' 0..1 (chromophore hemoglobin/melanin + mixed-light evening)
     mixed_light: float = 0.0        # 'Światło mieszane (LED)' 0..1 (Dual-illuminant split-face white/red unification in OKLab)
     skin_cast: float = 0.0          # 'Czysta skóra' 0..1 (OKLCh skin-locus cast reduction)
@@ -70,10 +71,25 @@ class Params:
     aspect: str = "orig"            # crop preset key (geometry.ASPECTS)
     strokes: list = field(default_factory=list)       # manual dodge/burn, see brush_map()
     heal_strokes: list = field(default_factory=list)  # non-destructive frequency-separated healing strokes
+    mask_strokes: list = field(default_factory=list)  # manual AI skin mask '+ Dodaj' / '- Usuń' strokes
     rating: int = 0                 # 0..5 star rating per photo (Library module)
     flag: int = 0                   # -1 = Odrzucone (X), 0 = Brak (U), +1 = Wybrane (P)
     reference_path: str | None = None  # optional per-photo reference path override ('__none__' = standalone)
     ref_colorchecker: bool = False  # whether per-photo reference is a ColorChecker 24 chart
+
+    @classmethod
+    def clean_original(cls, keep_from: Params | None = None) -> Params:
+        """Pure as-loaded zeroed parameters (0% D&B, 0% 3D, 0% vignette, 0% reference, no strokes/crop)."""
+        p = cls(
+            strength=0.0, skin=1.0, vignette=0.0, db=0.0, plastic=0.0, skin_even=0.0,
+            strokes=[], heal_strokes=[], mask_strokes=[], crop=None, angle=0.0,
+        )
+        if keep_from is not None:
+            p.rating = keep_from.rating
+            p.flag = keep_from.flag
+            p.reference_path = keep_from.reference_path
+            p.ref_colorchecker = keep_from.ref_colorchecker
+        return p
 
     def to_dict(self):
         return asdict(self)
@@ -89,7 +105,7 @@ class Params:
             setattr(p, k, float(np.clip(getattr(p, k), 0, 1)))
         for k in ("contrast", "brightness", "dehaze", "texture", "shadows", "highlights", "whites", "blacks",
                   "clarity", "saturation", "vibrance", "shadow_tone", "midtone_tone", "highlight_tone",
-                  "grading_balance", "hsl_green", "hsl_blue",
+                  "grading_balance", "hsl_green", "hsl_blue", "skin_fill",
                   "skin_hue", "mask_hue_tol", "temp", "tint", "light_x", "light_y", "bg_exposure"):
             setattr(p, k, float(np.clip(getattr(p, k), -1, 1)))
         for hk in ("hsl_hue", "hsl_sat", "hsl_lum"):
@@ -103,6 +119,7 @@ class Params:
         p.ref_colorchecker = bool(p.ref_colorchecker)
         p.strokes = list(p.strokes or [])
         p.heal_strokes = list(p.heal_strokes or [])
+        p.mask_strokes = list(p.mask_strokes or [])
         p.angle = float(np.clip(p.angle or 0.0, -45, 45))
         p.crop = GEO.clamp_crop(p.crop)
         if p.aspect not in GEO.ASPECTS: p.aspect = "orig"
@@ -112,7 +129,7 @@ class Params:
         base = tuple(round(getattr(self, k), 3) for k in (
             "strength", "exposure", "contrast", "brightness", "dehaze", "shadows", "highlights", "whites", "blacks",
             "saturation", "vibrance", "shadow_tone", "midtone_tone", "highlight_tone", "grading_balance",
-            "hsl_green", "hsl_blue", "skin_cast", "skin_hue", "wide", "temp", "tint"))
+            "hsl_green", "hsl_blue", "skin_fill", "skin_cast", "skin_hue", "wide", "temp", "tint"))
         hsl_k = tuple(round(float(v), 3) for hk in ("hsl_hue", "hsl_sat", "hsl_lum") for v in getattr(self, hk))
         return base + hsl_k
 
@@ -148,7 +165,40 @@ class Fit:
 
 MASK_SIDE = 400   # skin mask working size (long side) for every resolution
 
-def skin_mask_fixed(src, faces_n, qh, qw, subject=None, hue_tol: float = 0.0, protect_features: float = 0.0, lms_n=None):
+def apply_mask_strokes(mask: np.ndarray, mask_strokes: list, rgb_ref: np.ndarray | None = None) -> np.ndarray:
+    """Apply non-destructive manual '+ Dodaj' ('add') and '- Usuń' ('sub') AI mask strokes at canonical MASK_SIDE."""
+    if not mask_strokes:
+        return mask
+    h, w = mask.shape[:2]
+    m = mask.astype(np.float32).copy()
+    guide = (rgb_ref.astype(np.float32) / 255.0) if (rgb_ref is not None and rgb_ref.shape[:2] == (h, w)) else None
+    for st in mask_strokes:
+        pts = np.asarray(st.get("points", []), np.float32)
+        if len(pts) == 0:
+            continue
+        r = max(1.5, float(st.get("size", 0.03)) * w)
+        layer = np.zeros((h, w), np.float32)
+        p_px = np.round(pts * [w, h]).astype(np.int32)
+        if len(p_px) == 1:
+            cv2.circle(layer, (int(p_px[0, 0]), int(p_px[0, 1])), max(1, int(round(r * 0.85))), 1.0, -1)
+        else:
+            cv2.polylines(layer, [p_px.reshape(-1, 1, 2)], False, 1.0, max(1, int(round(r * 1.55))))
+        soft = float(np.clip(st.get("softness", 0.4), 0.0, 1.0))
+        sig = max(0.6, r * (0.12 + 0.55 * soft))
+        layer = cv2.GaussianBlur(layer, (0, 0), sig)
+        if guide is not None and soft < 0.75:
+            gr = max(1, int(round(r * 0.35)))
+            layer = np.clip(C.guided_refine_rgb(guide, layer, gr, 3e-3), 0.0, 1.0)
+        layer = np.clip(layer * 1.25, 0.0, 1.0)
+        if st.get("mode") == "sub":
+            m = np.clip(m * (1.0 - layer) - 0.12 * layer, 0.0, 1.0)
+        else:
+            m = np.clip(m + layer, 0.0, 1.0)
+    return m.astype(np.float32)
+
+
+def skin_mask_fixed(src, faces_n, qh, qw, subject=None, hue_tol: float = 0.0, protect_features: float = 0.0,
+                    lms_n=None, mask_strokes=None, fallback_chrominance: bool = False):
     """Skin mask computed at a fixed working size and returned at (qh, qw). Resolution independent on
     purpose: with noisy input (RAW, no in-camera noise reduction) the colour test passed far more shadow
     pixels at full resolution than in the preview, so the export's shadows got the skin LUT."""
@@ -156,8 +206,15 @@ def skin_mask_fixed(src, faces_n, qh, qw, subject=None, hue_tol: float = 0.0, pr
     mw, mh = max(2, round(W*s)), max(2, round(H*s))
     small = src if (mh, mw) == (H, W) else cv2.resize(src, (mw, mh), interpolation=cv2.INTER_AREA)
     lms_scaled = [np.asarray(l, np.float32) * mw for l in lms_n] if lms_n else None
-    m = F.skin_mask(small, [f*mw for f in faces_n], subject=subject,
-                    hue_tol=hue_tol, protect_features=protect_features, lms=lms_scaled).astype(np.float32)
+    if faces_n:
+        m = F.skin_mask(small, [f*mw for f in faces_n], subject=subject,
+                        hue_tol=hue_tol, protect_features=protect_features, lms=lms_scaled).astype(np.float32)
+    elif fallback_chrominance:
+        m = SP.chrominance_skin_mask(small, subject=subject)
+    else:
+        m = np.zeros((mh, mw), np.float32)
+    if mask_strokes:
+        m = apply_mask_strokes(m, mask_strokes, rgb_ref=small)
     return m if (mh, mw) == (qh, qw) else cv2.resize(m, (qw, qh), interpolation=cv2.INTER_LINEAR)
 
 def brush_map(strokes, h, w):
@@ -433,13 +490,15 @@ class Engine:
         has_hsl8 = any(any(abs(v) > 1e-4 for v in getattr(p, hk)) for hk in ("hsl_hue", "hsl_sat", "hsl_lum"))
         has_grading = any((p.shadow_tone, p.midtone_tone, p.highlight_tone, p.hsl_green, p.hsl_blue, has_hsl8))
         has_tone = any((p.exposure, p.contrast, p.brightness, p.dehaze, p.highlights, p.shadows, p.whites, p.blacks,
-                        p.saturation, p.vibrance, has_grading, is_skin and (p.skin_cast or p.skin_hue)))
+                        p.saturation, p.vibrance, has_grading, is_skin and (p.skin_fill or p.skin_cast or p.skin_hue)))
         if has_tone:
             lin = TN.srgb_to_lin(rgb)
             if p.exposure: lin = TN.apply_exposure_lin(lin, p.exposure)
             if p.contrast or p.brightness or p.dehaze or p.highlights or p.shadows or p.whites or p.blacks:
                 lin = TN.apply_tone_lin(lin, p.contrast, p.highlights, p.shadows, p.whites, p.blacks,
                                         brightness=p.brightness, dehaze=p.dehaze)
+            if is_skin and p.skin_fill:
+                lin = TN.apply_skin_fill_oklch(lin, p.skin_fill)
             if is_skin and (p.skin_cast or p.skin_hue):
                 lin = TN.apply_skin_oklch(lin, p.skin_cast, p.skin_hue)
             if has_grading:
@@ -480,13 +539,18 @@ class Engine:
         q = cv2.resize(src, (qw, qh), interpolation=cv2.INTER_AREA)
         subj = fit.relight.fg if (fit.relight is not None and getattr(fit.relight, "fg", None) is not None) else None
         lms_n = getattr(fit, "lms_n", None)
-        mq_raw = skin_mask_fixed(src, fit.faces_n, qh, qw, subject=subj,
-                                 hue_tol=p.mask_hue_tol, protect_features=p.mask_protect,
-                                 lms_n=lms_n)
+        mq_raw = skin_mask_fixed(
+            src, fit.faces_n, qh, qw, subject=subj,
+            hue_tol=p.mask_hue_tol, protect_features=p.mask_protect,
+            lms_n=lms_n, mask_strokes=p.mask_strokes,
+            fallback_chrominance=(not fit.faces_n and abs(p.skin_fill) > 1e-4),
+        )
         lms_q = [np.asarray(l, np.float32) * qw for l in lms_n] if lms_n else None
         if p.mixed_light > 1e-4 and fit.faces_n:
             mq_raw = SP.mixed_light_face_mask(q, mq_raw, [f*qw for f in fit.faces_n], lms_q=lms_q)
-        skin_w = max(p.skin, 1.0 if (p.skin_cast > 0 or abs(p.skin_hue) > 1e-4 or p.mixed_light > 1e-4) else 0.0)
+            if p.mask_strokes:
+                mq_raw = apply_mask_strokes(mq_raw, p.mask_strokes, rgb_ref=q)
+        skin_w = max(p.skin, 1.0 if (abs(p.skin_fill) > 1e-4 or p.skin_cast > 0 or abs(p.skin_hue) > 1e-4 or p.mixed_light > 1e-4) else 0.0)
         mq = mq_raw*skin_w
         gain = np.zeros((qh, qw, 3), np.float32)
         need_vig = p.vignette > 0 and np.any(fit.vig_diff < 0)

@@ -24,27 +24,23 @@ SHARPEN_MODES = {
 
 
 def _denoise_oklab_edge_preserving(rgb: np.ndarray, amount: float) -> np.ndarray:
-    """Dual-band edge-preserving denoise:
-    - Strong bilateral smoothing on LAB/OKLab chrominance channels (a*, b*) to eliminate high-ISO
-      colour speckles without bleeding across colour edges.
-    - Subtle edge-preserving bilateral luma smoothing in shadows/midtones while keeping pores sharp."""
+    """Dual-band edge-preserving denoise accelerated via OpenCL UMat bilateral filtering."""
+    from . import device as DEV
     amt = float(np.clip(amount, 0.0, 1.0))
     if amt <= 1e-4:
         return rgb
     lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
     L, a, b = lab[..., 0], lab[..., 1], lab[..., 2]
 
-    # Chrominance denoising (two passes of fast bilateral filter on a* and b*)
     sig_c = 12.0 + 28.0 * amt
     sig_s = 5.0 + 6.0 * amt
-    a_dn = cv2.bilateralFilter(a, d=7, sigmaColor=sig_c, sigmaSpace=sig_s)
-    b_dn = cv2.bilateralFilter(b, d=7, sigmaColor=sig_c, sigmaSpace=sig_s)
+    a_dn = DEV.ocl_bilateral_filter(a, d=7, sigma_color=sig_c, sigma_space=sig_s)
+    b_dn = DEV.ocl_bilateral_filter(b, d=7, sigma_color=sig_c, sigma_space=sig_s)
     if amt > 0.45:
-        a_dn = cv2.bilateralFilter(a_dn, d=5, sigmaColor=sig_c * 0.8, sigmaSpace=sig_s)
-        b_dn = cv2.bilateralFilter(b_dn, d=5, sigmaColor=sig_c * 0.8, sigmaSpace=sig_s)
+        a_dn = DEV.ocl_bilateral_filter(a_dn, d=5, sigma_color=sig_c * 0.8, sigma_space=sig_s)
+        b_dn = DEV.ocl_bilateral_filter(b_dn, d=5, sigma_color=sig_c * 0.8, sigma_space=sig_s)
 
-    # Subtle luminance denoising weighted toward darker tones
-    L_dn = cv2.bilateralFilter(L, d=5, sigmaColor=4.0 + 10.0 * amt, sigmaSpace=3.0)
+    L_dn = DEV.ocl_bilateral_filter(L, d=5, sigma_color=4.0 + 10.0 * amt, sigma_space=3.0)
     w_luma = (0.35 * amt) * np.clip(1.0 - (L / 255.0) * 0.5, 0.25, 1.0)
     lab[..., 0] = L + w_luma * (L_dn - L)
     lab[..., 1] = a + min(1.0, amt * 1.15) * (a_dn - a)
@@ -57,12 +53,7 @@ def _rl_deconvolution_luma(Y: np.ndarray, amount: float, sigma: float = 1.0, ite
     from . import device as DEV
     amt = float(np.clip(amount, 0.0, 1.0))
     y_norm = np.clip(Y / 255.0, 1e-4, 1.0).astype(np.float32)
-    u = y_norm.copy()
-    for _ in range(iters):
-        conv = DEV.ocl_gaussian_blur(u, sigma)
-        ratio = y_norm / np.maximum(conv, 1e-3)
-        corr = DEV.ocl_gaussian_blur(ratio, sigma)
-        u = np.clip(u * (1.0 + 1.15 * amt * (corr - 1.0)), 1e-4, 1.35)
+    u = DEV.ocl_rl_deconv(y_norm, amt, sigma=sigma, iters=iters)
     d = (u - y_norm) * 255.0 * (1.55 * amt)
     k5 = np.ones((5, 5), np.uint8)
     y_min = cv2.erode(Y, k5)
@@ -92,7 +83,6 @@ def apply_detail_pass(rgb: np.ndarray, mask_q: np.ndarray | None = None,
         sk = mask_q.astype(np.float32) if mask_q.shape[:2] == (H, W) else DEV.ocl_resize(mask_q.astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR)
         sk = np.clip(sk, 0.0, 1.0)
 
-    # 1. Texture / Structure ('Struktura', -1..1): fine detail band (sigma 0.7 .. 2.2 px)
     if abs(texture) > 1e-4:
         y_fine = DEV.ocl_gaussian_blur(Y, 0.7)
         y_mid = DEV.ocl_gaussian_blur(Y, 2.2)
@@ -101,13 +91,11 @@ def apply_detail_pass(rgb: np.ndarray, mask_q: np.ndarray | None = None,
             d_tex *= (1.0 - 0.55 * sk)
         d_total += d_tex
 
-    # 2. Multi-mode sharpening ('Ostrość', 0..1)
     if sharpen_amount > 1e-4:
         amt = float(np.clip(sharpen_amount, 0.0, 1.0))
         mode = sharpen_mode if sharpen_mode in SHARPEN_MODES else "portrait"
         if mode == "soft":
-            # Optical soft-focus diffusion: attenuate fine contrast while keeping major edges
-            y_sm = cv2.bilateralFilter(Y, d=7, sigmaColor=24.0, sigmaSpace=4.5)
+            y_sm = DEV.ocl_bilateral_filter(Y, d=7, sigma_color=24.0, sigma_space=4.5)
             d_sh = -0.88 * amt * (Y - y_sm)
         elif mode == "rl":
             d_sh = _rl_deconvolution_luma(Y, amt, sigma=1.05, iters=3)

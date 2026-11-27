@@ -618,3 +618,28 @@ def apply_heal_strokes(rgb: np.ndarray, heal_strokes: list | None) -> np.ndarray
 
     return out
 
+
+def chrominance_skin_mask(rgb_q: np.ndarray, subject: np.ndarray | None = None) -> np.ndarray:
+    """Guided chrominance skin mask fallback (YCrCb + OKLCh skin locus + RGB guided edge snap),
+    used ONLY when no frontal face box was detected (e.g. hand close-up or turned profile)
+    and the user explicitly adjusts skin_fill."""
+    from . import color as C, tone as TN
+    h, w = rgb_q.shape[:2]
+    ycrcb = cv2.cvtColor(rgb_q, cv2.COLOR_RGB2YCrCb).astype(np.float32)
+    Y, Cr, Cb = ycrcb[..., 0], ycrcb[..., 1], ycrcb[..., 2]
+    lin = TN.srgb_to_lin(rgb_q.astype(np.float32) / 255.0)
+    ok = TN.lin_to_oklab(lin)
+    C_ok = np.hypot(ok[..., 1], ok[..., 2])
+    h_deg = np.degrees(np.arctan2(ok[..., 2], ok[..., 1])) % 360.0
+    dh = np.abs(((h_deg - 48.0 + 180.0) % 360.0) - 180.0)
+
+    w_ycc = ((Y > 22.0) & (Cr >= 131.0) & (Cr <= 182.0) & (Cb >= 76.0) & (Cb <= 130.0)).astype(np.float32)
+    w_ok = (np.exp(-((dh / 28.0) ** 2)) * np.clip(C_ok / 0.022, 0.0, 1.0)).astype(np.float32)
+    m = w_ycc * w_ok
+    if subject is not None and subject.size > 0:
+        sub = cv2.resize(subject.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
+        if float((sub > 0.3).mean()) > 0.02:
+            m = m * np.clip(sub * 1.4, 0.0, 1.0)
+    r = max(2, int(max(h, w) * 0.012))
+    m = np.clip(C.guided_refine_rgb(rgb_q.astype(np.float32) / 255.0, m, r, 2e-3), 0.0, 1.0)
+    return cv2.GaussianBlur(m, (0, 0), max(0.6, max(h, w) * 0.003)).astype(np.float32)

@@ -5,7 +5,7 @@ the picture's content (local normalised cross-correlation of band-pass luminance
 level, compact regions only; invariant to the AI's regrade, relight, smoothing and redrawn grain) -> Bilateral Guided Upsampling fit original -> AI with those places and the area
 outside the AI frame weighted 0 (they get the neighbours' / global transform, never AI content).
 render(): slice the grid on the full-resolution original in strips, then mix with the original in
-CIELAB: a*b* by `kolor`, L* by `jasnosc` x optional brush mask (Photoshop Color / Luminosity idea)."""
+CIELAB: a*b* by `kolor`, L* by `jasnosc` x optional brush mask (separate chrominance / luminance blend)."""
 from __future__ import annotations
 from dataclasses import dataclass, field
 import numpy as np, cv2

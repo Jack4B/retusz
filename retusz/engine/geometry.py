@@ -41,11 +41,12 @@ def crop_px(crop, w, h):
 
 def apply(img, angle, crop, interp=cv2.INTER_CUBIC):
     """Straighten then crop (one resampling). img: HxW or HxWxC, any dtype OpenCV warps."""
+    from . import device as DEV
     h, w = img.shape[:2]; x0, y0, x1, y1 = crop_px(crop, w, h)
     if not angle:
         return img if crop is None else img[y0:y1, x0:x1]
     M = matrix(angle, w, h); M[:, 2] -= (x0, y0)
-    return cv2.warpAffine(img, M, (x1-x0, y1-y0), flags=interp, borderMode=cv2.BORDER_REPLICATE)
+    return DEV.ocl_warp_affine(img, M, (x1-x0, y1-y0), flags=interp, borderMode=cv2.BORDER_REPLICATE)
 
 def horizon_angle(a, b):
     """Angle change (deg) that makes the line a->b (frame pixels) level; steep lines are taken as verticals."""
